@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IB Math Practice</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="boot-msg" style="padding:14px 20px;background:#fef3c7;color:#78350f;font:14px system-ui,sans-serif">Loading&hellip; If this yellow message stays, the files next to this page are missing (style.css, app.js, data/). Extract or clone the <b>whole</b> repository folder &mdash; do not copy index.html on its own &mdash; and open <code>app/index.html</code> from inside it.</div>
+<div id="connect" hidden>
+  <div class="card">
+    <h2>Connect to your private repository</h2>
+    <p>The question images stay in your private GitHub repository. This page fetches them only when you open a question, using a read-only token that is stored in this browser only.</p>
+    <ol>
+      <li>GitHub &rarr; Settings &rarr; Developer settings &rarr; Personal access tokens &rarr; <b>Fine-grained tokens</b> &rarr; Generate new token.</li>
+      <li>Expiration: 90 days. Repository access: <b>Only select repositories</b> &rarr; <code>IB-math</code>.</li>
+      <li>Permissions &rarr; Repository permissions &rarr; <b>Contents: Read-only</b> (nothing else).</li>
+      <li>Generate, copy the token and paste it below.</li>
+    </ol>
+    <input id="c-token" type="password" placeholder="github_pat_..." autocomplete="off">
+    <button id="c-test">Test connection</button>
+    <p id="c-msg" aria-live="polite"></p>
+  </div>
+</div>
+<header>
+  <h1>IB Math Practice</h1>
+  <nav>
+    <button data-view="browse" class="active">Browse</button>
+    <button data-view="practice">Practice</button>
+    <button data-view="review">Review tags</button>
+    <button data-view="stats">Progress</button>
+  </nav>
+</header>
+
+<main id="browse">
+  <div class="topbar">
+    <span class="muted">Course</span>
+    <div id="b-scope" class="seg">
+      <button data-scope="HL|AA">HL Analysis &amp; Approaches</button>
+      <button data-scope="SL|AA">SL Analysis &amp; Approaches</button>
+      <button data-scope="HL|AI">HL Applications &amp; Interpretation</button>
+      <button data-scope="SL|AI">SL Applications &amp; Interpretation</button>
+    </div>
+  </div>
+  <p id="b-summary" class="muted"></p>
+  <div id="b-cards"></div>
+</main>
+
+<main id="practice" hidden>
+  <div id="filterbar">
+    <label>Course
+      <select id="f-subject"><option value="">All</option><option value="AA">Analysis &amp; Approaches</option><option value="AI">Applications &amp; Interpretation</option></select></label>
+    <label>Level
+      <select id="f-level"><option value="">All</option><option>HL</option><option>SL</option></select></label>
+    <label>Topic
+      <select id="f-topic"><option value="">All</option></select></label>
+    <label class="wide">Subtopic
+      <select id="f-subtopic"><option value="">All</option></select></label>
+    <label>Difficulty
+      <span class="range"><select id="f-dmin"></select> to <select id="f-dmax"></select></span></label>
+    <label>Status
+      <select id="f-status">
+        <option value="">All</option><option value="new">Not attempted</option>
+        <option value="wrong">Needs review (&lt;100%)</option><option value="done">Full marks</option></select></label>
+    <span class="grow"></span>
+    <button id="more-toggle" aria-expanded="false">More filters &#9662;</button>
+    <button id="clear-filters">Clear filters</button>
+    <button id="random">Random question</button>
+    <div id="more-filters" hidden>
+      <label>Search
+        <input id="f-search" type="search" placeholder="e.g. 2023 may p2 tz1 q7 or tangents"></label>
+      <label>Year
+        <select id="f-year"><option value="">All</option></select></label>
+      <label>Month
+        <select id="f-month"><option value="">All</option><option>May</option><option>November</option></select></label>
+      <label>Paper
+        <select id="f-paper"><option value="">All</option><option>1</option><option>2</option><option>3</option></select></label>
+      <label>Time zone
+        <select id="f-tz"><option value="">All</option><option>TZ0</option><option>TZ1</option><option>TZ2</option><option>TZ3</option></select></label>
+      <label>Question number
+        <input id="f-qnum" type="number" min="1" placeholder="any"></label>
+    </div>
+  </div>
+  <div id="p-body">
+    <aside id="p-list">
+      <div class="list-head"><span id="count"></span><button id="list-toggle" title="Hide the list">&laquo;</button></div>
+      <ul id="list"></ul>
+    </aside>
+    <section id="viewer">
+      <div id="empty">Pick a topic in <b>Browse</b>, or choose a question from the list.</div>
+      <div id="question" hidden>
+        <div id="meta"></div>
+        <img id="q-img" alt="Question">
+        <div class="actions">
+          <button id="toggle-ms">Show markscheme</button>
+          <button id="toggle-sol" hidden>Show my solution</button>
+          <a id="my-sol" target="_blank" rel="noopener" hidden>Open full PDF at this page</a>
+          <span id="no-sol" class="muted" hidden>No solution PDF for this paper</span>
+          <button id="edit-tags" title="Open this question in the tag review editor">Edit tags</button>
+          <span class="grow"></span>
+          <label>Marks awarded <input id="score" type="number" min="0" value="0"> / <span id="max"></span></label>
+          <button id="save">Save result</button>
+          <button id="next">Next</button>
+        </div>
+        <div id="saved" aria-live="polite"></div>
+        <img id="ms-img" alt="Markscheme" hidden>
+        <div id="sol-panel" hidden>
+          <p id="sol-note" class="muted"></p>
+          <img id="sol-img" alt="My solution">
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<main id="review" hidden>
+  <aside id="r-side">
+    <label>Show
+      <select id="r-filter">
+        <option value="low">Low confidence</option>
+        <option value="unreviewed">Not reviewed yet</option>
+        <option value="changed">Changed by review pass</option>
+        <option value="edited">Edited by me</option>
+        <option value="all">All questions</option>
+      </select></label>
+    <label>Level
+      <select id="r-level"><option value="">All</option><option>HL</option><option>SL</option></select></label>
+    <label>Course
+      <select id="r-subject"><option value="">All</option><option value="AA">Analysis &amp; Approaches</option><option value="AI">Applications &amp; Interpretation</option></select></label>
+    <label>Search
+      <input id="r-search" type="search" placeholder="e.g. 2023 may p2 tz1 q7"></label>
+    <p id="r-count"></p>
+    <progress id="r-progress" max="1" value="0"></progress>
+    <ul id="r-list"></ul>
+  </aside>
+  <section id="r-main">
+    <div id="r-empty">Pick a question from the list.</div>
+    <div id="r-detail" hidden>
+      <div id="r-meta"></div>
+      <div id="r-note"></div>
+      <div id="r-edit">
+        <label>Topic <select id="e-topic"></select></label>
+        <label>Subtopic <select id="e-sub"></select></label>
+        <label>Also needs (extra subtopics) <select id="e-extra" multiple size="4"></select></label>
+        <div class="diff">Difficulty <span id="e-diff"></span></div>
+      </div>
+      <div class="actions">
+        <button id="r-ok">Looks right (Enter)</button>
+        <button id="r-save">Save changes</button>
+        <button id="r-reset">Reset to original</button>
+        <span class="grow"></span>
+        <button id="r-prev">&larr; Previous</button>
+        <button id="r-next">Next &rarr;</button>
+      </div>
+      <div id="r-saved" aria-live="polite"></div>
+      <div id="r-images"><div><h3>Question</h3><img id="r-q-img" alt="Question"></div><div><h3>Markscheme</h3><img id="r-ms-img" alt="Markscheme"></div></div>
+    </div>
+  </section>
+</main>
+
+<main id="stats" hidden>
+  <h2>Progress by topic</h2>
+  <table id="stats-table"></table>
+  <button id="export">Export progress (JSON)</button>
+  <label class="file">Import progress <input id="import-progress" type="file" accept="application/json"></label>
+  <button id="reset">Reset progress</button>
+  <div id="conn-box" hidden>
+    <h2>Connection</h2>
+    <button id="disconnect">Disconnect (forget token)</button>
+    <button id="clear-cache">Clear cached images</button>
+  </div>
+  <h2>Tag review</h2>
+  <p id="review-stats"></p>
+  <button id="export-overrides">Export tag overrides (JSON)</button>
+  <label class="file">Import tag overrides <input id="import-overrides" type="file" accept="application/json"></label>
+  <button id="reset-overrides">Discard all my tag edits</button>
+</main>
+<script src="data/config.js"></script>
+<script src="data/data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
