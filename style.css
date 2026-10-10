@@ -51,6 +51,10 @@ nav button.active{border-color:var(--acc);color:var(--acc);font-weight:600}
 .toolbar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0;margin-bottom:12px;background:var(--bg);border-bottom:1px solid var(--line)}
 .list-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line);font-size:13px;color:var(--mute)}
 .list-close{display:none}
+.now{display:none}
+.pos{position:absolute;left:0;right:0;bottom:-1px;height:3px;background:transparent}
+.pos i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+.notice{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 20px;background:rgba(217,119,6,.14);border-bottom:1px solid var(--warn);font-size:14px}
 .side ul{list-style:none;margin:0;padding:0}
 .side li{padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px}
 .side li:hover,.side li.sel{background:var(--card)}
@@ -130,6 +134,8 @@ img.failed{cursor:pointer;color:#b91c1c}
   h1{font-size:15px}
   nav button{padding:6px 10px}
   .toolbar{gap:6px}
+  .now{display:block;flex-basis:100%;font-size:13px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .now b{color:var(--fg)}
   .toolbar button{padding:6px 9px;font-size:14px}
   #random{display:none}
   select,input{font-size:16px}
@@ -141,8 +147,8 @@ img.failed{cursor:pointer;color:#b91c1c}
   #practice,#review{height:auto;display:block}
   .split,.split.collapsed{display:block}
   .side,.split.collapsed>.side{display:none;border-right:0}
-  .split.list-open>.side{display:block}
-  .split.list-open>.main{display:none}
+  /* the list opens as a scrollable box under the toolbar (top/max-height set by JS); the question stays visible behind it */
+  .split.list-open>.side{display:block;position:fixed;left:8px;right:8px;z-index:30;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.3);overflow:auto;overscroll-behavior:contain}
   .main{overflow:visible;padding:0 12px 24px}
   .list-close{display:inline-block}
   .side li{padding:13px 12px;font-size:14px}

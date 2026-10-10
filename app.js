@@ -5,8 +5,11 @@ let questions = [], topics = {}, current = null, shown = [];
 const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 // Manual tag edits (Tag editor) and "review later" marks, both kept in this browser's localStorage.
-const OKEY = "ibmath.overrides.v1", FKEY = "ibmath.flags.v1";
-let overrides = lsGet(OKEY), flags = lsGet(FKEY), reviewLog = {}, current_r = null, rShown = [];
+const OKEY = "ibmath.overrides.v1", FKEY = "ibmath.flags.v1", SKEY = "ibmath.overrides.setaside.v1";
+// Tag edits saved before the subtopic list was reorganised (no `tax` stamp, older than STALE_BEFORE) refer to old subtopic
+// numbers and would show the wrong subtopic now. They are set aside (kept, not deleted) and the user is told once.
+const TAX = 2, STALE_BEFORE = 1791634312917;
+let overrides = lsGet(OKEY), flags = lsGet(FKEY), current_r = null, rShown = [];
 const PAGE = 200;  // list rows rendered at a time
 let listLimit = PAGE, rListLimit = PAGE;
 
@@ -121,8 +124,27 @@ function fillSelect(sel, items, keep = "") {
 }
 
 // The list/viewer panels: on a wide screen the list collapses to the left; on a phone it swaps with the viewer.
-function toggleList(split) { split.classList.toggle(isNarrow() ? "list-open" : "collapsed"); }
-function showViewer(split) { split.classList.remove("list-open"); window.scrollTo(0, 0); }
+function placePanel(split) { // phone: the open list is a box under the toolbar that never covers the whole screen
+  const side = split.querySelector(".side"), bar = split.querySelector(".toolbar");
+  if (!isNarrow() || !split.classList.contains("list-open") || !bar) { side.style.top = side.style.maxHeight = ""; return; }
+  let r = bar.getBoundingClientRect();
+  if (r.top > innerHeight * 0.45) { bar.scrollIntoView({ block: "start" }); r = bar.getBoundingClientRect(); }
+  side.style.top = r.bottom + 4 + "px";
+  side.style.maxHeight = Math.max(160, Math.min(innerHeight * 0.5, innerHeight - r.bottom - 16)) + "px";
+}
+function openList(split, open) { split.classList.toggle(isNarrow() ? "list-open" : "collapsed", isNarrow() ? open : !open); placePanel(split); }
+function toggleList(split) { openList(split, isNarrow() ? !split.classList.contains("list-open") : split.classList.contains("collapsed")); }
+function showViewer(split) { split.classList.remove("list-open"); placePanel(split); window.scrollTo(0, 0); }
+function setPosition(bar, labelEl, idx, n, fallback) { // "3 / 12" and a thin progress line under the toolbar
+  labelEl.textContent = idx >= 0 ? `${idx + 1} / ${n}` : fallback;
+  bar.style.width = idx >= 0 && n ? `${(100 * (idx + 1)) / n}%` : "0";
+}
+document.addEventListener("pointerdown", (e) => { // tap outside the open list box closes it
+  for (const sp of document.querySelectorAll(".split.list-open")) {
+    if (isNarrow() && !e.target.closest(".side") && !e.target.closest("#list-toggle, #r-list-toggle")) { sp.classList.remove("list-open"); placePanel(sp); }
+  }
+});
+for (const ev of ["scroll", "resize"]) window.addEventListener(ev, () => document.querySelectorAll(".split.list-open").forEach(placePanel), { passive: true });
 
 // ---------------- practice: filters ----------------
 const FILTER_IDS = ["f-subject", "f-level", "f-topic", "f-subtopic", "f-paper", "f-diff", "f-year", "f-month", "f-tz"];
@@ -164,9 +186,9 @@ function onFilters() { renderList(true); }
 function renderList(reset) {
   shown = filtered();
   if (reset) listLimit = PAGE;
-  const n = shown.length, word = `question${n === 1 ? "" : "s"}`;
-  $("count").textContent = `${n} ${word}`;
-  $("list-label").textContent = `List (${n})`;
+  const n = shown.length, idx = shown.findIndex((q) => current && q.id === current.id);
+  $("count").textContent = `${n} question${n === 1 ? "" : "s"}` + (idx >= 0 ? ` · ${n - idx - 1} left after this one` : "");
+  setPosition($("pos-bar"), $("list-label"), idx, n, `List (${n})`);
   $("fb-summary").textContent = filterSummary();
   const rows = shown.slice(0, listLimit).map((q, i) =>
     `<li data-i="${i}" class="${current && current.id === q.id ? "sel" : ""}"><span class="r">${isMarked(q) ? '<span class="flag">⚑</span>' : ""}${q.marks}m</span>` +
@@ -187,6 +209,7 @@ function openQuestion(q) {
     (q.topic_name ? ` <span>${esc(q.topic_name)} › ${esc(q.subtopic_name)}</span> ${tierPill(q)}` : "") +
     (q.edited ? ' <span class="badge edited">edited</span>' : "");
   setupSolution(q);
+  $("now").innerHTML = `<b>${label(q)}</b> · ${esc(q.subtopic_name || "")}${q.difficulty ? " · " + TIER_NAMES[tier(q.difficulty)] : ""}`;
   updateMarkUI();
   renderList();
   $("viewer").scrollTop = 0;
@@ -234,13 +257,7 @@ function toggleSolution() {
 }
 
 // ---------------- tag editor ----------------
-const REVIEW_FILTERS = {
-  low: (q) => q.low_confidence && !q.reviewed,
-  unchecked: (q) => !q.reviewed,
-  changed: (q) => !!reviewLog[q.id],
-  edited: (q) => q.edited,
-  all: () => true,
-};
+const REVIEW_FILTERS = { edited: (q) => q.edited, all: () => true };
 function rFiltered() {
   const f = $("r-filter").value, lv = $("r-level").value, sj = $("r-subject").value, pp = $("r-paper").value, yr = $("r-year").value;
   return questions.filter((q) => REVIEW_FILTERS[f](q) && (!lv || q.level === lv) && (!sj || q.subject === sj) &&
@@ -249,13 +266,12 @@ function rFiltered() {
 function renderReviewList(reset) {
   rShown = rFiltered();
   if (reset) rListLimit = PAGE;
-  const n = rShown.length, done = questions.filter((q) => q.reviewed).length;
-  $("r-count").textContent = `${n} shown · ${done}/${questions.length} checked`;
-  const i = rShown.findIndex((q) => current_r && q.id === current_r.id);
-  $("r-list-label").textContent = `List (${n})` + (i >= 0 ? ` · ${i + 1}/${n}` : "");
+  const n = rShown.length, i = rShown.findIndex((q) => current_r && q.id === current_r.id);
+  $("r-count").textContent = `${n} question${n === 1 ? "" : "s"}` + (i >= 0 ? ` · ${n - i - 1} left after this one` : "");
+  setPosition($("r-pos-bar"), $("r-list-label"), i, n, `List (${n})`);
   const rows = rShown.slice(0, rListLimit).map((q, k) =>
     `<li data-i="${k}" class="${current_r && current_r.id === q.id ? "sel" : ""}"><span class="r">` +
-    `${q.edited ? "edited" : q.reviewed ? "checked ✓" : q.low_confidence ? "low conf." : ""}</span>${label(q)}<br>` +
+    `${q.edited ? "edited" : ""}</span>${label(q)}<br>` +
     `<small>${esc(q.subtopic_name || "(untagged)")} · ${TIER_NAMES[tier(q.difficulty)]}</small></li>`);
   if (n > rListLimit) rows.push(`<li class="more" data-more>Show ${Math.min(PAGE, n - rListLimit)} more (${n - rListLimit} left)</li>`);
   $("r-list").innerHTML = rows.join("") || '<li class="muted">Nothing to show with these filters.</li>';
@@ -278,12 +294,9 @@ function openReview(q) {
   current_r = q;
   $("r-empty").hidden = true; $("r-detail").hidden = false;
   setImage($("r-q-img"), q.img); setImage($("r-ms-img"), q.ms_img);
-  $("r-meta").innerHTML = `<b>${label(q)}</b> · ${q.marks} marks ` +
-    (q.edited ? '<span class="badge edited">edited</span>' : q.reviewed ? '<span class="badge checked">checked</span>' : q.low_confidence ? '<span class="badge low">low confidence</span>' : "");
-  const lg = reviewLog[q.id] || [];
-  $("r-note").innerHTML = esc(q.review_note || "") +
-    (q.ms_steps != null ? ` <small>(method marks counted: ${q.ms_steps})</small>` : "") +
-    (lg.length ? "<br><small>Changed by the AI review pass: " + lg.map((x) => `${x.field} ${x.before}→${x.after}${x.reason ? " (" + esc(x.reason) + ")" : ""}`).join("; ") + "</small>" : "");
+  $("r-meta").innerHTML = `<b>${label(q)}</b> · ${q.marks} marks ` + (q.edited ? '<span class="badge edited">edited</span>' : "");
+  $("r-note").textContent = q.review_note || "";
+  $("r-now").innerHTML = `<b>${label(q)}</b> · ${esc(q.subtopic_name || "")}`;
   $("e-topic").innerHTML = topics[q.subject].map((t) => `<option value="${t.id}">${t.id}. ${esc(t.name)}</option>`).join("");
   $("e-topic").value = q.topic;
   fillEditSubs(q, q.topic, q.subtopic, q.extra);
@@ -295,7 +308,7 @@ function openReview(q) {
 }
 function saveOverride(patch) {
   const q = current_r; if (!q) return;
-  overrides[q.id] = { ...(overrides[q.id] || {}), ...patch, ts: Date.now() };
+  overrides[q.id] = { ...(overrides[q.id] || {}), ...patch, ts: Date.now(), tax: TAX };
   lsSet(OKEY, overrides);
   applyOverride(q);
   renderList();
@@ -313,15 +326,9 @@ function setupReview() {
     const li = e.target.closest("li[data-i]"); if (li) openReview(rShown[+li.dataset.i]);
   });
   $("r-list-toggle").onclick = () => toggleList($("review"));
-  $("r-list-close").onclick = () => $("review").classList.remove("list-open");
+  $("r-list-close").onclick = () => openList($("review"), false);
   $("e-topic").addEventListener("change", () => fillEditSubs(current_r, $("e-topic").value, null, []));
   $("e-diff").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setDiffButtons(+b.dataset.t); });
-  $("r-ok").onclick = () => {
-    const i = rShown.findIndex((q) => q.id === current_r.id), nextQ = rShown[i + 1];  // pick the next item before the list changes
-    saveOverride({ reviewed: true });
-    if (nextQ) openReview(nextQ); else openReview(current_r);
-    $("r-saved").textContent = "Marked as checked.";
-  };
   $("r-save").onclick = () => {
     const extra = [...$("e-extra").selectedOptions].map((o) => o.value).filter((v) => v !== $("e-sub").value);
     saveOverride({ topic: $("e-topic").value, subtopic: $("e-sub").value, extra, difficulty: tierToDiff(curTier() || tier(current_r.difficulty), current_r.difficulty), reviewed: true });
@@ -334,21 +341,37 @@ function setupReview() {
     if (!current) return;
     $("r-filter").value = "all"; $("r-subject").value = current.subject; $("r-level").value = current.level;
     $("r-paper").value = String(current.paper); $("r-year").value = String(current.year);
-    showView("review"); openReview(current);
+    $("settings").hidden = true; showView("review"); openReview(current);
   };
   document.addEventListener("keydown", (e) => {
     if ($("review").hidden || !current_r || typing(e) || !$("settings").hidden) return;
     if (e.key === "ArrowRight") reviewStep(1);
     else if (e.key === "ArrowLeft") reviewStep(-1);
-    else if (e.key === "Enter") $("r-ok").click();
     else if (/^[1-3]$/.test(e.key)) setDiffButtons(+e.key);
   });
 }
 
 // ---------------- settings sheet ----------------
+function retireStale() { // -> ids of tag edits that were set aside
+  const stale = Object.entries(overrides).filter(([, o]) => o.topic && !o.tax && (o.ts || 0) < STALE_BEFORE);
+  if (!stale.length) return [];
+  const aside = lsGet(SKEY);
+  for (const [id, o] of stale) { aside[id] = o; delete overrides[id]; }
+  lsSet(SKEY, aside); lsSet(OKEY, overrides);
+  return stale.map(([id]) => id);
+}
+function showNotice(ids) {
+  if (!ids.length) return;
+  $("notice-text").textContent = `${ids.length} of your earlier tag edit${ids.length === 1 ? " was" : "s were"} made before the subtopic list was reorganised, ` +
+    `so ${ids.length === 1 ? "it was" : "they were"} set aside (not deleted) and the questions show their current tags again: ` +
+    ids.slice(0, 5).map((id) => id.replace(/-(AA|AI)-/, " $1 ")).join(", ") + (ids.length > 5 ? ` and ${ids.length - 5} more` : "") + ".";
+  $("notice").hidden = false;
+}
 function openSettings() {
-  $("review-stats").textContent = `${questions.filter((q) => q.reviewed).length} of ${questions.length} questions checked · ` +
-    `${questions.filter((q) => q.edited).length} edited by you · ${Object.keys(flags).length} marked ⚑`;
+  $("review-stats").textContent = `${questions.filter((q) => q.edited).length} tag edits by you · ${Object.keys(flags).length} questions marked ⚑`;
+  const inPractice = !$("practice").hidden && current;
+  $("set-q").hidden = !inPractice;
+  if (inPractice) $("set-q-label").textContent = `${label(current)} — ${current.topic_name} › ${current.subtopic_name}`;
   $("settings").hidden = false;
 }
 function setupSettings() {
@@ -359,7 +382,7 @@ function setupSettings() {
   const afterChange = () => { questions.forEach(applyOverride); renderList(); renderReviewList(); if (!$("browse").hidden) renderBrowse(); openSettings(); };
   $("export-overrides").onclick = () => {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, exported_at: new Date().toISOString(), overrides, flags }, null, 1)], { type: "application/json" }));
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, exported_at: new Date().toISOString(), overrides, flags, set_aside: lsGet(SKEY) }, null, 1)], { type: "application/json" }));
     a.download = "tag_overrides.json"; a.click();
   };
   $("import-overrides").addEventListener("change", async (e) => {
@@ -370,15 +393,18 @@ function setupSettings() {
       const fl = Object.entries(data.flags || {}).filter(([id]) => ids.has(id));
       overrides = { ...overrides, ...Object.fromEntries(ov) }; lsSet(OKEY, overrides);
       flags = { ...flags, ...Object.fromEntries(fl) }; lsSet(FKEY, flags);
+      const aside = retireStale();
       afterChange();
       alert(`Imported ${ov.length} tag edits and ${fl.length} marks.`);
+      showNotice(aside);
     } catch { alert("That file is not a valid export from this app."); }
     e.target.value = "";
   });
   $("clear-marks").onclick = () => { if (confirm("Remove all ⚑ review-later marks?")) { flags = {}; lsSet(FKEY, flags); updateMarkUI(); afterChange(); } };
   $("reset-overrides").onclick = () => {
-    if (confirm("Discard all your tag edits and checked marks? (Export first if you want to keep them.)")) { overrides = {}; lsSet(OKEY, overrides); afterChange(); }
+    if (confirm("Discard all your tag edits? (Export first if you want to keep them.)")) { overrides = {}; lsSet(OKEY, overrides); afterChange(); }
   };
+  $("notice-close").onclick = () => { $("notice").hidden = true; };
   $("conn-box").hidden = !REMOTE;
   $("disconnect").onclick = () => { try { localStorage.removeItem(TKEY); } catch {} location.reload(); };
   $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
@@ -390,7 +416,7 @@ function showView(v) {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.view === v));
   for (const id of VIEWS) $(id).hidden = id !== v;
   try { localStorage.setItem("ibmath.view", v); } catch {}
-  if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) $("review").classList.add("list-open"); }
+  if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) openList($("review"), true); }
   if (v === "browse") renderBrowse();
   window.scrollTo(0, 0);
 }
@@ -401,8 +427,8 @@ function renderBrowse() {
   const [level, subject] = bScope.split("|");
   document.querySelectorAll("#b-scope button").forEach((b) => b.classList.toggle("on", b.dataset.scope === bScope));
   const pool = questions.filter((q) => q.level === level && q.subject === subject);
-  const lowN = pool.filter((q) => q.low_confidence && !q.reviewed).length, markedN = Object.keys(flags).length;
-  $("b-summary").textContent = `${pool.length} questions` + (lowN ? ` · ${lowN} with tags still uncertain` : "") + " — tap a subtopic to practise it.";
+  const markedN = Object.keys(flags).length;
+  $("b-summary").textContent = `${pool.length} questions — tap a subtopic to practise it.`;
   const mb = $("b-marked"); mb.hidden = !markedN; mb.innerHTML = `&#9873; Review marked (${markedN})`;
   $("b-cards").innerHTML = topics[subject].map((t) => {
     const tq = pool.filter((q) => q.topic === t.id);
@@ -456,7 +482,7 @@ function setupPractice() {
     const li = e.target.closest("li[data-i]"); if (li) openQuestion(shown[+li.dataset.i]);
   });
   $("list-toggle").onclick = () => toggleList($("p-body"));
-  $("p-list-close").onclick = () => $("p-body").classList.remove("list-open");
+  $("p-list-close").onclick = () => openList($("p-body"), false);
   $("random").onclick = () => { if (shown.length) openQuestion(shown[Math.floor(Math.random() * shown.length)]); };
   $("prev").onclick = $("prev2").onclick = () => step(-1);
   $("next").onclick = $("next2").onclick = () => step(1);
@@ -482,19 +508,20 @@ async function init() {
     const d = await loadData();
     questions = d.questions; topics = d.topics;
     const boot = document.getElementById("boot-msg"); if (boot) boot.remove();
-    for (const x of d.reviewLog || []) (reviewLog[x.id] ||= []).push(x);
   } catch (e) {
     const boot = document.getElementById("boot-msg"); if (boot) boot.remove();
     document.body.insertAdjacentHTML("afterbegin", '<p class="load-error">Could not load the question data. Run <code>python3 tools/merge_tags.py</code> to create <code>app/data/data.js</code>, or serve the folder with <code>python3 -m http.server</code> and open <code>/app/</code>.</p>');
     return;
   }
   await connectCard();
+  const aside = retireStale();
   questions.forEach(applyOverride);
   const years = [...new Set(questions.map((q) => q.year))].sort().map((y) => [String(y), String(y)]);
   fillSelect($("f-year"), years); fillSelect($("r-year"), years);
   refreshTopicFilters();
   document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showView(b.dataset.view));
   setupPractice(); setupReview(); setupBrowse(); setupSettings();
+  showNotice(aside);
   renderList(true);
   try { bScope = localStorage.getItem("ibmath.scope") || bScope; } catch {}
   let v = "browse"; try { v = localStorage.getItem("ibmath.view") || "browse"; } catch {}

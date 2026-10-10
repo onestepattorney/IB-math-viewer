@@ -28,6 +28,11 @@
   <div class="sheet" role="dialog" aria-label="Settings">
     <div class="sheet-head"><h2>Settings</h2><button id="settings-close" aria-label="Close">&times;</button></div>
     <p id="review-stats" class="muted"></p>
+    <div id="set-q" hidden>
+      <h3>This question</h3>
+      <p id="set-q-label" class="muted"></p>
+      <button id="edit-tags">Fix its topic, subtopic or difficulty&hellip;</button>
+    </div>
     <h3>Backup</h3>
     <p class="muted">Your tag edits and &#9873; review-later marks live in this browser only. Export them to keep a copy or move them to another device.</p>
     <div class="row">
@@ -58,6 +63,8 @@
   </nav>
   <button id="open-settings" class="icon-btn" aria-label="Settings" title="Settings">&#9881;</button>
 </header>
+
+<div id="notice" class="notice" hidden><span id="notice-text"></span><button id="notice-close">OK</button></div>
 
 <main id="browse">
   <div class="topbar">
@@ -122,6 +129,8 @@
         <span class="grow"></span>
         <button id="mark" class="mark-btn" aria-pressed="false">&#9873; Review later</button>
         <button id="random" title="Open a random question from the list">Random</button>
+        <div class="now" id="now"></div>
+        <span class="pos" aria-hidden="true"><i id="pos-bar"></i></span>
       </div>
       <div id="empty">Pick a topic in <b>Browse</b>, or open the question list.</div>
       <div id="question" hidden>
@@ -132,8 +141,6 @@
           <button id="toggle-sol" hidden>Show my solution</button>
           <a id="my-sol" target="_blank" rel="noopener" hidden>Open full PDF at this page</a>
           <span id="no-sol" class="muted" hidden>No solution PDF for this paper</span>
-          <span class="grow"></span>
-          <button id="edit-tags" title="Fix this question's topic, subtopic or difficulty">Edit tags</button>
         </div>
         <img id="ms-img" alt="Markscheme" hidden>
         <div id="sol-panel" hidden>
@@ -158,11 +165,8 @@
     <div id="r-filters">
       <label>Show
         <select id="r-filter">
-          <option value="low">Low confidence</option>
-          <option value="unchecked">Not checked yet</option>
-          <option value="changed">Changed by AI review pass</option>
-          <option value="edited">Edited by me</option>
           <option value="all">All questions</option>
+          <option value="edited">Edited by me</option>
         </select></label>
       <label>Course
         <select id="r-subject"><option value="">All</option><option value="AA">Analysis &amp; Approaches</option><option value="AI">Applications &amp; Interpretation</option></select></label>
@@ -180,6 +184,8 @@
       <button id="r-list-toggle" title="Show or hide the question list">&#9776; <span id="r-list-label">List</span></button>
       <button id="r-prev" aria-label="Previous question">&lsaquo; Prev</button>
       <button id="r-next" aria-label="Next question">Next &rsaquo;</button>
+      <div class="now" id="r-now"></div>
+      <span class="pos" aria-hidden="true"><i id="r-pos-bar"></i></span>
     </div>
     <div id="r-empty">Open the question list and pick a question.</div>
     <div id="r-detail" hidden>
@@ -196,7 +202,6 @@
         <div class="diff">Difficulty <span id="e-diff"></span></div>
       </div>
       <div class="actions">
-        <button id="r-ok">Looks right (Enter)</button>
         <button id="r-save">Save changes</button>
         <button id="r-reset">Reset to original</button>
       </div>
