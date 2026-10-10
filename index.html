@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=202610101230">
 </head>
 <body>
 <div id="boot-msg" style="padding:14px 20px;background:#fef3c7;color:#78350f;font:14px system-ui,sans-serif">Loading&hellip; If this yellow message stays, the files next to this page are missing (style.css, app.js, data/). Extract or clone the <b>whole</b> repository folder &mdash; do not copy index.html on its own &mdash; and open <code>app/index.html</code> from inside it.</div>
@@ -28,11 +28,13 @@
   <div class="sheet" role="dialog" aria-label="Settings">
     <div class="sheet-head"><h2>Settings</h2><button id="settings-close" aria-label="Close">&times;</button></div>
     <p id="review-stats" class="muted"></p>
-    <div id="set-q" hidden>
-      <h3>This question</h3>
-      <p id="set-q-label" class="muted"></p>
-      <button id="edit-tags">Fix its topic, subtopic or difficulty&hellip;</button>
+    <h3>Tag editor</h3>
+    <p class="muted">Fix a question's topic, subtopic or difficulty if it looks wrong.</p>
+    <div class="row">
+      <button id="open-editor">Open tag editor</button>
+      <button id="edit-tags" hidden>Fix the open question</button>
     </div>
+    <p id="set-q-label" class="muted" hidden></p>
     <h3>Backup</h3>
     <p class="muted">Your tag edits and &#9873; review-later marks live in this browser only. Export them to keep a copy or move them to another device.</p>
     <div class="row">
@@ -44,6 +46,7 @@
       <button id="clear-marks">Clear all &#9873; marks</button>
       <button id="reset-overrides">Discard all my tag edits</button>
     </div>
+    <p id="version" class="muted" hidden></p>
     <div id="conn-box" hidden>
       <h3>Connection</h3>
       <div class="row">
@@ -59,7 +62,7 @@
   <nav>
     <button data-view="browse" class="active">Browse</button>
     <button data-view="practice">Practice</button>
-    <button data-view="review">Tag editor</button>
+    <button data-view="review" id="nav-review" hidden>Tag editor</button>
   </nav>
   <button id="open-settings" class="icon-btn" aria-label="Settings" title="Settings">&#9881;</button>
 </header>
@@ -114,6 +117,7 @@
         <label>Question number
           <input id="f-qnum" type="number" min="1" inputmode="numeric" placeholder="any"></label>
       </div>
+      <button id="apply" class="primary">Show questions</button>
     </div>
   </div>
   <div id="p-body" class="split">
@@ -198,7 +202,7 @@
       <div id="r-edit">
         <label>Topic <select id="e-topic"></select></label>
         <label>Subtopic <select id="e-sub"></select></label>
-        <label>Also needs (extra subtopics) <select id="e-extra" multiple size="4"></select></label>
+        <label>Also covers (optional, pick several) <select id="e-extra" multiple size="4"></select></label>
         <div class="diff">Difficulty <span id="e-diff"></span></div>
       </div>
       <div class="actions">
@@ -209,8 +213,8 @@
     </div>
   </section>
 </main>
-<script src="data/config.js"></script>
-<script src="data/data.js"></script>
-<script src="app.js"></script>
+<script src="data/config.js?v=202610101230"></script>
+<script src="data/data.js?v=202610101230"></script>
+<script src="app.js?v=202610101230"></script>
 </body>
 </html>

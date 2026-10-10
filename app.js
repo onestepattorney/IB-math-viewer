@@ -161,41 +161,74 @@ function refreshSubtopics() {
   fillSelect($("f-subtopic"), subs.map((s) => [s.name, `${s.id} ${s.name}${s.hl_only ? " (HL)" : ""}`]));
 }
 
-function filtered() {
-  const f = {
-    level: $("f-level").value, subject: $("f-subject").value, paper: $("f-paper").value,
-    topic: $("f-topic").value, sub: $("f-subtopic").value, diff: +$("f-diff").value,
-    year: $("f-year").value, month: $("f-month").value, tz: $("f-tz").value, qnum: $("f-qnum").value,
-    marked: $("f-marked").checked,
-  };
-  return questions.filter((q) =>
-    (!f.level || q.level === f.level) && (!f.subject || q.subject === f.subject) &&
-    (!f.paper || String(q.paper) === f.paper) && (!f.year || String(q.year) === f.year) &&
-    (!f.month || q.month === f.month) && (!f.tz || q.tz === f.tz) && (!f.qnum || String(q.q) === f.qnum) &&
-    (!f.topic || q.topic === f.topic) && (!f.sub || q.subtopic_name === f.sub) &&
-    (!f.diff || tier(q.difficulty) === f.diff) && (!f.marked || isMarked(q)));
-}
-function filterSummary() {
+// The controls only edit a draft. The list is built from `applied`, which changes only when "Show questions" is pressed,
+// so the list on screen always matches the filters it says it was built from.
+const EMPTY_F = { level: "", subject: "", paper: "", topic: "", sub: "", diff: 0, year: "", month: "", tz: "", qnum: "", marked: false };
+let applied = null, appliedText = "";  // null until the first "Show questions"
+const readDraft = () => ({
+  level: $("f-level").value, subject: $("f-subject").value, paper: $("f-paper").value,
+  topic: $("f-topic").value, sub: $("f-subtopic").value, diff: +$("f-diff").value,
+  year: $("f-year").value, month: $("f-month").value, tz: $("f-tz").value, qnum: $("f-qnum").value,
+  marked: $("f-marked").checked,
+});
+const matcher = (f) => (q) =>
+  (!f.level || q.level === f.level) && (!f.subject || q.subject === f.subject) &&
+  (!f.paper || String(q.paper) === f.paper) && (!f.year || String(q.year) === f.year) &&
+  (!f.month || q.month === f.month) && (!f.tz || q.tz === f.tz) && (!f.qnum || String(q.q) === f.qnum) &&
+  (!f.topic || q.topic === f.topic) && (!f.sub || q.subtopic_name === f.sub) &&
+  (!f.diff || tier(q.difficulty) === f.diff) && (!f.marked || isMarked(q));
+const filtered = () => (applied ? questions.filter(matcher(applied)) : []);
+function draftText() {
   const parts = FILTER_IDS.filter((id) => $(id).value).map((id) => $(id).selectedOptions[0].text);
   if ($("f-qnum").value) parts.push("Q" + $("f-qnum").value);
   if ($("f-marked").checked) parts.push("⚑ only");
-  return (parts.length ? parts.join(" · ") : "All questions") + ` — ${shown.length}`;
+  return parts.length ? parts.join(" · ") : "All questions";
 }
-function onFilters() { renderList(true); }
+function updateDraftUI() { // live count on the button + a line saying which filters the list shows
+  const f = readDraft(), n = questions.filter(matcher(f)).length, b = $("apply");
+  b.disabled = n === 0;
+  b.textContent = n ? `Show ${n} question${n === 1 ? "" : "s"}` : "No questions match";
+  const pending = JSON.stringify(f) !== JSON.stringify(applied || EMPTY_F), el = $("fb-summary");
+  const mark = pending ? '<span class="pending">Not applied yet</span> · ' : "";  // first, so a phone's truncated line still shows it
+  if (applied) el.innerHTML = `${mark}Showing: ${esc(appliedText)} — ${shown.length}`;
+  else el.innerHTML = pending ? `${mark}press “Show”` : "Choose filters, then press “Show”.";
+}
+function setFiltersOpen(o) { $("filterbar").classList.toggle("open", o); $("fb-toggle").setAttribute("aria-expanded", String(o)); $("fb-toggle").innerHTML = o ? "Filters &#9652;" : "Filters &#9662;"; }
+function clearViewer() {
+  current = null; $("question").hidden = true; $("empty").hidden = false; $("now").textContent = "";
+  setImage($("q-img"), null); setImage($("ms-img"), null); $("ms-img").hidden = true; setImage($("sol-img"), null); updateMarkUI();
+}
+function applyFilters({ first = false } = {}) {
+  applied = readDraft(); appliedText = draftText();
+  clearViewer();  // the previous question belongs to the previous filters
+  renderList(true);
+  setFiltersOpen(false);
+  if (first && shown.length) { openQuestion(shown[0]); return; }
+  if (isNarrow()) requestAnimationFrame(() => openList($("p-body"), true)); else $("p-body").classList.remove("collapsed");
+}
+function clearAll() { // back to the state when Practice is first opened
+  for (const id of FILTER_IDS) $(id).value = "";
+  $("f-qnum").value = ""; $("f-marked").checked = false;
+  refreshTopicFilters();
+  applied = null; appliedText = "";
+  clearViewer();
+  if (isNarrow()) { openList($("p-body"), false); setFiltersOpen(true); }
+  renderList(true);
+}
 
 function renderList(reset) {
   shown = filtered();
   if (reset) listLimit = PAGE;
   const n = shown.length, idx = shown.findIndex((q) => current && q.id === current.id);
-  $("count").textContent = `${n} question${n === 1 ? "" : "s"}` + (idx >= 0 ? ` · ${n - idx - 1} left after this one` : "");
-  setPosition($("pos-bar"), $("list-label"), idx, n, `List (${n})`);
-  $("fb-summary").textContent = filterSummary();
+  $("count").textContent = !applied ? "No list yet" : `${n} question${n === 1 ? "" : "s"}` + (idx >= 0 ? ` · ${n - idx - 1} left after this one` : "");
+  setPosition($("pos-bar"), $("list-label"), idx, n, applied ? `List (${n})` : "List");
   const rows = shown.slice(0, listLimit).map((q, i) =>
     `<li data-i="${i}" class="${current && current.id === q.id ? "sel" : ""}"><span class="r">${isMarked(q) ? '<span class="flag">⚑</span>' : ""}${q.marks}m</span>` +
     `${label(q)}<br><small>${esc(q.title || "(untagged)")}${q.difficulty ? " · " + TIER_NAMES[tier(q.difficulty)] : ""}</small></li>`);
   if (n > listLimit) rows.push(`<li class="more" data-more>Show ${Math.min(PAGE, n - listLimit)} more (${n - listLimit} left)</li>`);
-  $("list").innerHTML = rows.join("") || '<li class="muted">No questions match these filters.</li>';
-  if (!current) $("empty").textContent = n ? "Pick a question from the list." : "No questions match these filters — loosen a filter above.";
+  $("list").innerHTML = rows.join("") || `<li class="muted">${applied ? "No questions match these filters." : "Choose filters above, then press “Show”."}</li>`;
+  if (!current) $("empty").textContent = !applied ? "Choose filters above, then press “Show” to get a list of questions." : n ? `${n} question${n === 1 ? "" : "s"} found — pick one from the list.` : "No questions match these filters — loosen a filter and press “Show” again.";
+  updateDraftUI();
   const sel = $("list").querySelector("li.sel"); if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 
@@ -369,13 +402,14 @@ function showNotice(ids) {
 }
 function openSettings() {
   $("review-stats").textContent = `${questions.filter((q) => q.edited).length} tag edits by you · ${Object.keys(flags).length} questions marked ⚑`;
-  const inPractice = !$("practice").hidden && current;
-  $("set-q").hidden = !inPractice;
-  if (inPractice) $("set-q-label").textContent = `${label(current)} — ${current.topic_name} › ${current.subtopic_name}`;
+  const inPractice = !!(!$("practice").hidden && current);
+  $("edit-tags").hidden = $("set-q-label").hidden = !inPractice;
+  if (inPractice) $("set-q-label").textContent = `Open question: ${label(current)} — ${current.topic_name} › ${current.subtopic_name}`;
   $("settings").hidden = false;
 }
 function setupSettings() {
   $("open-settings").onclick = openSettings;
+  $("open-editor").onclick = () => { $("settings").hidden = true; showView("review"); };
   $("settings-close").onclick = () => { $("settings").hidden = true; };
   $("settings").addEventListener("click", (e) => { if (e.target === $("settings")) $("settings").hidden = true; });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("settings").hidden = true; });
@@ -405,6 +439,7 @@ function setupSettings() {
     if (confirm("Discard all your tag edits? (Export first if you want to keep them.)")) { overrides = {}; lsSet(OKEY, overrides); afterChange(); }
   };
   $("notice-close").onclick = () => { $("notice").hidden = true; };
+  if (window.IB_VERSION) { $("version").textContent = "Version: " + window.IB_VERSION; $("version").hidden = false; }
   $("conn-box").hidden = !REMOTE;
   $("disconnect").onclick = () => { try { localStorage.removeItem(TKEY); } catch {} location.reload(); };
   $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
@@ -415,6 +450,7 @@ function showView(v) {
   if (!VIEWS.includes(v)) v = "browse";
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.view === v));
   for (const id of VIEWS) $(id).hidden = id !== v;
+  $("nav-review").hidden = v !== "review";  // the Tag editor tab only shows while you are in it
   try { localStorage.setItem("ibmath.view", v); } catch {}
   if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) openList($("review"), true); }
   if (v === "browse") renderBrowse();
@@ -448,11 +484,7 @@ function goPractice({ level, subject, topic, sub, marked }) {
   $("f-level").value = level || ""; $("f-subject").value = subject || "";
   refreshTopicFilters(); $("f-topic").value = topic || ""; refreshSubtopics();
   if (sub) $("f-subtopic").value = subName(subject, sub) || "";
-  $("filterbar").classList.remove("open"); $("fb-toggle").innerHTML = "Filters &#9662;";
-  current = null; $("question").hidden = true; $("empty").hidden = false;
-  showView("practice"); renderList(true);
-  if (shown.length) openQuestion(shown[0]);
-  else if (isNarrow()) $("p-body").classList.add("list-open");
+  showView("practice"); applyFilters({ first: true });
 }
 function setupBrowse() {
   $("b-scope").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { bScope = b.dataset.scope; try { localStorage.setItem("ibmath.scope", bScope); } catch {} renderBrowse(); } });
@@ -465,18 +497,16 @@ function setupBrowse() {
   $("b-marked").onclick = () => goPractice({ marked: true });
 }
 function setupPractice() {
-  const fbOpen = () => { const o = $("filterbar").classList.toggle("open"); $("fb-toggle").setAttribute("aria-expanded", String(o)); $("fb-toggle").innerHTML = o ? "Filters &#9652;" : "Filters &#9662;"; };
+  const fbOpen = () => setFiltersOpen(!$("filterbar").classList.contains("open"));
   $("fb-toggle").onclick = fbOpen; $("fb-summary").onclick = fbOpen;
   const more = $("more-toggle");
   more.onclick = () => { const h = $("more-filters").hidden; $("more-filters").hidden = !h; more.setAttribute("aria-expanded", String(h)); more.innerHTML = h ? "More &#9652;" : "More &#9662;"; };
-  $("clear-filters").onclick = () => {
-    for (const id of FILTER_IDS) $(id).value = "";
-    $("f-qnum").value = ""; $("f-marked").checked = false;
-    refreshTopicFilters(); onFilters();
-  };
-  for (const id of FILTER_IDS) $(id).addEventListener("change", () => { if (id === "f-subject") refreshTopicFilters(); else if (id === "f-topic") refreshSubtopics(); onFilters(); });
-  $("f-marked").addEventListener("change", onFilters);
-  $("f-qnum").addEventListener("input", onFilters);
+  $("clear-filters").onclick = clearAll;
+  $("apply").onclick = () => applyFilters();
+  for (const id of FILTER_IDS) $(id).addEventListener("change", () => { if (id === "f-subject") refreshTopicFilters(); else if (id === "f-topic") refreshSubtopics(); updateDraftUI(); });
+  $("f-marked").addEventListener("change", updateDraftUI);
+  $("f-qnum").addEventListener("input", updateDraftUI);
+  $("f-qnum").addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("apply").disabled) applyFilters(); });
   $("list").addEventListener("click", (e) => {
     if (e.target.closest("[data-more]")) { listLimit += PAGE; renderList(); return; }
     const li = e.target.closest("li[data-i]"); if (li) openQuestion(shown[+li.dataset.i]);
