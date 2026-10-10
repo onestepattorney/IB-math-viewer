@@ -1,22 +1,14 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const KEY = "ibmath.results.v1";
 let questions = [], topics = {}, current = null, shown = [];
 
-const store = {
-  load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } },
-  save(r) { try { localStorage.setItem(KEY, JSON.stringify(r)); } catch {} },
-};
-let results = store.load();
-
-// ---- tag overrides (manual review edits), kept in localStorage and applied over questions.json ----
-const OKEY = "ibmath.overrides.v1";
-const ostore = {
-  load() { try { return JSON.parse(localStorage.getItem(OKEY)) || {}; } catch { return {}; } },
-  save(o) { try { localStorage.setItem(OKEY, JSON.stringify(o)); } catch {} },
-};
-let overrides = ostore.load(), reviewLog = {}, current_r = null, rShown = [];
-
+const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+// Manual tag edits (Tag editor) and "review later" marks, both kept in this browser's localStorage.
+const OKEY = "ibmath.overrides.v1", FKEY = "ibmath.flags.v1";
+let overrides = lsGet(OKEY), flags = lsGet(FKEY), reviewLog = {}, current_r = null, rShown = [];
+const PAGE = 200;  // list rows rendered at a time
+let listLimit = PAGE, rListLimit = PAGE;
 
 // ---- assets: local relative paths, or (link mode) fetched on demand from the private repo via the GitHub API ----
 const REMOTE = window.IB_REMOTE || null;
@@ -99,11 +91,6 @@ const subOptions = (q) => { // subtopics a question may use: course list, no HL-
   const t = (topics[q.subject] || []).find((x) => x.id === (q._topic || q.topic));
   return t ? t.subtopics.filter((s) => q.level === "HL" || !s.hl_only) : [];
 };
-function buildTags(q) {
-  const w = [String(q.year), q.month, q.level, q.subject, `P${q.paper}`, `paper${q.paper}`, q.tz, `Q${q.q}`, q.topic_name, q.subtopic_name];
-  for (const e of q.extra || []) w.push(subName(q.subject, e));
-  q.tags = [...new Set(w.filter(Boolean).map((x) => x.toLowerCase()))].sort();
-}
 function applyOverride(q) {
   if (!q.orig) q.orig = { topic: q.topic, subtopic: q.subtopic, extra: q.extra || [], difficulty: q.difficulty, reviewed: !!q.reviewed };
   const o = overrides[q.id];
@@ -114,27 +101,37 @@ function applyOverride(q) {
     if (o.reviewed) q.reviewed = true;
   }
   q.topic_name = topicName(q.topic); q.subtopic_name = subName(q.subject, q.subtopic);
-  buildTags(q);
 }
 
-const status = (q) => {
-  const r = results[q.id];
-  return !r ? "new" : r.score >= r.max ? "done" : "wrong";
-};
+// Difficulty is stored 1-5 in the data; the app shows three levels.
+const TIER_NAMES = ["", "Easy", "Medium", "Hard"];
+const tier = (d) => (d == null ? 0 : d <= 2 ? 1 : d === 3 ? 2 : 3);
+const tierToDiff = (t, cur) => (tier(cur) === t ? cur : [null, 2, 3, 4][t]);  // keep the stored value when the level is unchanged
+const tierPill = (q) => (q.difficulty ? `<span class="tier t${tier(q.difficulty)}">${TIER_NAMES[tier(q.difficulty)]}</span>` : "");
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const label = (q) => `${q.year} ${q.month.slice(0, 3)} ${q.level} ${q.subject} P${q.paper}${q.tz === "TZ0" ? "" : " " + q.tz} Q${q.q}`;
+const isMarked = (q) => !!flags[q.id];
+const isNarrow = () => window.matchMedia("(max-width: 800px)").matches;
+const typing = (e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
 
 function fillSelect(sel, items, keep = "") {
   const prev = sel.value;
-  sel.innerHTML = '<option value="">All</option>' + items.map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+  sel.innerHTML = '<option value="">All</option>' + items.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join("");
   sel.value = items.some(([v]) => v === prev) ? prev : keep;
 }
+
+// The list/viewer panels: on a wide screen the list collapses to the left; on a phone it swaps with the viewer.
+function toggleList(split) { split.classList.toggle(isNarrow() ? "list-open" : "collapsed"); }
+function showViewer(split) { split.classList.remove("list-open"); window.scrollTo(0, 0); }
+
+// ---------------- practice: filters ----------------
+const FILTER_IDS = ["f-subject", "f-level", "f-topic", "f-subtopic", "f-paper", "f-diff", "f-year", "f-month", "f-tz"];
 
 function refreshTopicFilters() {
   // Topic ids/names are shared by AA and AI; subtopics depend on the course.
   fillSelect($("f-topic"), topics.AA.map((t) => [t.id, `${t.id}. ${t.name}`]));
   refreshSubtopics();
 }
-
 function refreshSubtopics() {
   const tid = $("f-topic").value;
   const pool = $("f-subject").value === "AI" ? topics.AI : topics.AA;
@@ -145,29 +142,39 @@ function refreshSubtopics() {
 function filtered() {
   const f = {
     level: $("f-level").value, subject: $("f-subject").value, paper: $("f-paper").value,
-    topic: $("f-topic").value, sub: $("f-subtopic").value,
-    dmin: +$("f-dmin").value, dmax: +$("f-dmax").value, status: $("f-status").value,
+    topic: $("f-topic").value, sub: $("f-subtopic").value, diff: +$("f-diff").value,
     year: $("f-year").value, month: $("f-month").value, tz: $("f-tz").value, qnum: $("f-qnum").value,
-    terms: $("f-search").value.toLowerCase().split(/\s+/).filter(Boolean),
+    marked: $("f-marked").checked,
   };
   return questions.filter((q) =>
     (!f.level || q.level === f.level) && (!f.subject || q.subject === f.subject) &&
     (!f.paper || String(q.paper) === f.paper) && (!f.year || String(q.year) === f.year) &&
     (!f.month || q.month === f.month) && (!f.tz || q.tz === f.tz) && (!f.qnum || String(q.q) === f.qnum) &&
-    f.terms.every((t) => q.tags.includes(t) || q.code.toLowerCase().includes(t) || (t.length >= 4 && q.tags.some((x) => x.includes(t)))) &&
     (!f.topic || q.topic === f.topic) && (!f.sub || q.subtopic_name === f.sub) &&
-    (q.difficulty == null || (q.difficulty >= f.dmin && q.difficulty <= f.dmax)) &&
-    (!f.status || status(q) === f.status));
+    (!f.diff || tier(q.difficulty) === f.diff) && (!f.marked || isMarked(q)));
 }
+function filterSummary() {
+  const parts = FILTER_IDS.filter((id) => $(id).value).map((id) => $(id).selectedOptions[0].text);
+  if ($("f-qnum").value) parts.push("Q" + $("f-qnum").value);
+  if ($("f-marked").checked) parts.push("⚑ only");
+  return (parts.length ? parts.join(" · ") : "All questions") + ` — ${shown.length}`;
+}
+function onFilters() { renderList(true); }
 
-function renderList() {
+function renderList(reset) {
   shown = filtered();
-  $("count").textContent = `${shown.length} question${shown.length === 1 ? "" : "s"}`;
-  $("list").innerHTML = shown.slice(0, 400).map((q, i) => {
-    const r = results[q.id];
-    return `<li data-i="${i}" class="${status(q)} ${current && current.id === q.id ? "sel" : ""}">
-      <span class="s">${r ? r.score + "/" + r.max : q.marks + "m"}</span>${label(q)}<br><small>${q.title || "(untagged)"}${q.difficulty ? " · D" + q.difficulty : ""}</small></li>`;
-  }).join("");
+  if (reset) listLimit = PAGE;
+  const n = shown.length, word = `question${n === 1 ? "" : "s"}`;
+  $("count").textContent = `${n} ${word}`;
+  $("list-label").textContent = `List (${n})`;
+  $("fb-summary").textContent = filterSummary();
+  const rows = shown.slice(0, listLimit).map((q, i) =>
+    `<li data-i="${i}" class="${current && current.id === q.id ? "sel" : ""}"><span class="r">${isMarked(q) ? '<span class="flag">⚑</span>' : ""}${q.marks}m</span>` +
+    `${label(q)}<br><small>${esc(q.title || "(untagged)")}${q.difficulty ? " · " + TIER_NAMES[tier(q.difficulty)] : ""}</small></li>`);
+  if (n > listLimit) rows.push(`<li class="more" data-more>Show ${Math.min(PAGE, n - listLimit)} more (${n - listLimit} left)</li>`);
+  $("list").innerHTML = rows.join("") || '<li class="muted">No questions match these filters.</li>';
+  if (!current) $("empty").textContent = n ? "Pick a question from the list." : "No questions match these filters — loosen a filter above.";
+  const sel = $("list").querySelector("li.sel"); if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 
 function openQuestion(q) {
@@ -176,15 +183,33 @@ function openQuestion(q) {
   setImage($("q-img"), q.img); setImage($("ms-img"), q.ms_img); $("ms-img").hidden = true;
   const nx = shown[shown.findIndex((x) => x.id === q.id) + 1]; if (nx) prefetch([nx.img]);
   $("toggle-ms").textContent = "Show markscheme";
-  $("meta").innerHTML = `<b>${label(q)}</b> <small>${q.code}</small> · ${q.marks} marks${q.section ? " · Section " + q.section : ""}` +
-    (q.topic_name ? ` · ${q.topic_name} › ${q.subtopic_name} · Difficulty ${q.difficulty}/5` : "") +
-    (q.edited ? ' <span class="badge edited">edited</span>' : q.reviewed ? ' <span class="badge reviewed">reviewed</span>' : "");
+  $("meta").innerHTML = `<b>${label(q)}</b> <span>${q.marks} marks${q.section ? " · Section " + esc(q.section) : ""}</span>` +
+    (q.topic_name ? ` <span>${esc(q.topic_name)} › ${esc(q.subtopic_name)}</span> ${tierPill(q)}` : "") +
+    (q.edited ? ' <span class="badge edited">edited</span>' : "");
   setupSolution(q);
-  $("max").textContent = q.marks;
-  $("score").max = q.marks; $("score").value = results[q.id] ? results[q.id].score : 0;
-  $("saved").textContent = "";
+  updateMarkUI();
   renderList();
   $("viewer").scrollTop = 0;
+  showViewer($("p-body"));
+}
+function step(d) {
+  if (!shown.length) return;
+  const i = shown.findIndex((q) => current && q.id === current.id);
+  openQuestion(shown[i < 0 ? (d > 0 ? 0 : shown.length - 1) : (i + d + shown.length) % shown.length]);
+}
+
+// ---- review-later marks ----
+function updateMarkUI() {
+  const on = !!(current && isMarked(current));
+  for (const id of ["mark", "mark2"]) {
+    const b = $(id); b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
+    b.innerHTML = on ? "&#9873; Marked" : "&#9873; Review later";
+  }
+}
+function toggleMark() {
+  if (!current) return;
+  if (flags[current.id]) delete flags[current.id]; else flags[current.id] = Date.now();
+  lsSet(FKEY, flags); updateMarkUI(); renderList();
 }
 
 // ---- own solution PDF (data/solutions/*.pdf), opened at the page where the question starts ----
@@ -208,169 +233,166 @@ function toggleSolution() {
   if (show) { setImage($("sol-img"), current.my_solution_img || null); panel.scrollIntoView({ behavior: "smooth", block: "start" }); }
 }
 
-function save() {
-  if (!current) return;
-  const score = Math.max(0, Math.min(current.marks, +$("score").value || 0));
-  const prev = results[current.id];
-  results[current.id] = { score, max: current.marks, attempts: (prev ? prev.attempts : 0) + 1, ts: Date.now() };
-  store.save(results);
-  $("saved").textContent = `Saved: ${score}/${current.marks}`;
-  renderList();
-}
-
-function next() {
-  const i = shown.findIndex((q) => current && q.id === current.id);
-  if (shown.length) openQuestion(shown[(i + 1) % shown.length]);
-}
-
-function renderStats() {
-  $("review-stats").textContent = `${questions.filter((q) => q.reviewed).length} of ${questions.length} questions reviewed · ${questions.filter((q) => q.edited).length} edited by you`;
-  const agg = {};
-  for (const q of questions) {
-    const key = q.topic_name ? `${q.subject} · ${q.topic_name}` : "Untagged";
-    const a = (agg[key] ||= { n: 0, tried: 0, got: 0, max: 0 });
-    a.n++;
-    const r = results[q.id];
-    if (r) { a.tried++; a.got += r.score; a.max += r.max; }
-  }
-  $("stats-table").innerHTML = '<tr><th>Topic</th><th class="num">Attempted</th><th class="num">Score</th><th></th></tr>' +
-    Object.entries(agg).sort().map(([k, a]) => {
-      const pct = a.max ? Math.round((100 * a.got) / a.max) : 0;
-      return `<tr><td>${k}</td><td class="num">${a.tried}/${a.n}</td><td class="num">${a.max ? pct + "%" : "–"}</td><td><span class="pbar" style="width:${pct}px"></span></td></tr>`;
-    }).join("");
-}
-
-
-// ---------------- review tab ----------------
+// ---------------- tag editor ----------------
 const REVIEW_FILTERS = {
   low: (q) => q.low_confidence && !q.reviewed,
-  unreviewed: (q) => !q.reviewed,
+  unchecked: (q) => !q.reviewed,
   changed: (q) => !!reviewLog[q.id],
   edited: (q) => q.edited,
   all: () => true,
 };
 function rFiltered() {
-  const f = $("r-filter").value, lv = $("r-level").value, sj = $("r-subject").value;
-  const terms = $("r-search").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const f = $("r-filter").value, lv = $("r-level").value, sj = $("r-subject").value, pp = $("r-paper").value, yr = $("r-year").value;
   return questions.filter((q) => REVIEW_FILTERS[f](q) && (!lv || q.level === lv) && (!sj || q.subject === sj) &&
-    terms.every((t) => q.tags.includes(t) || q.code.toLowerCase().includes(t) || (t.length >= 4 && q.tags.some((x) => x.includes(t)))));
+    (!pp || String(q.paper) === pp) && (!yr || String(q.year) === yr));
 }
-function renderReviewList() {
+function renderReviewList(reset) {
   rShown = rFiltered();
-  const done = questions.filter((q) => q.reviewed).length;
-  $("r-count").textContent = `${rShown.length} shown · ${done} of ${questions.length} reviewed`;
-  $("r-progress").max = questions.length; $("r-progress").value = done;
-  $("r-list").innerHTML = rShown.slice(0, 400).map((q, i) =>
-    `<li data-i="${i}" class="${q.edited ? "edited" : q.reviewed ? "reviewed" : ""} ${current_r && current_r.id === q.id ? "sel" : ""}">` +
-    `<span class="b">${q.edited ? "edited" : q.reviewed ? "reviewed" : q.low_confidence ? "low conf." : ""}</span>${label(q)}<br><small>${q.subtopic_name || "(untagged)"} · D${q.difficulty}</small></li>`).join("");
+  if (reset) rListLimit = PAGE;
+  const n = rShown.length, done = questions.filter((q) => q.reviewed).length;
+  $("r-count").textContent = `${n} shown · ${done}/${questions.length} checked`;
+  const i = rShown.findIndex((q) => current_r && q.id === current_r.id);
+  $("r-list-label").textContent = `List (${n})` + (i >= 0 ? ` · ${i + 1}/${n}` : "");
+  const rows = rShown.slice(0, rListLimit).map((q, k) =>
+    `<li data-i="${k}" class="${current_r && current_r.id === q.id ? "sel" : ""}"><span class="r">` +
+    `${q.edited ? "edited" : q.reviewed ? "checked ✓" : q.low_confidence ? "low conf." : ""}</span>${label(q)}<br>` +
+    `<small>${esc(q.subtopic_name || "(untagged)")} · ${TIER_NAMES[tier(q.difficulty)]}</small></li>`);
+  if (n > rListLimit) rows.push(`<li class="more" data-more>Show ${Math.min(PAGE, n - rListLimit)} more (${n - rListLimit} left)</li>`);
+  $("r-list").innerHTML = rows.join("") || '<li class="muted">Nothing to show with these filters.</li>';
+  const sel = $("r-list").querySelector("li.sel"); if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 function fillEditSubs(q, topic, sub, extra) {
   const probe = { ...q, _topic: topic };
   const opts = subOptions(probe);
-  $("e-sub").innerHTML = opts.map((s) => `<option value="${s.id}">${s.id} ${s.name}${s.hl_only ? " (HL)" : ""}</option>`).join("");
+  $("e-sub").innerHTML = opts.map((s) => `<option value="${s.id}">${s.id} ${esc(s.name)}${s.hl_only ? " (HL)" : ""}</option>`).join("");
   $("e-sub").value = opts.some((s) => s.id === sub) ? sub : (opts[0] || {}).id;
   const all = (topics[q.subject] || []).flatMap((t) => t.subtopics).filter((s) => q.level === "HL" || !s.hl_only);
-  $("e-extra").innerHTML = all.map((s) => `<option value="${s.id}">${s.id} ${s.name}</option>`).join("");
+  $("e-extra").innerHTML = all.map((s) => `<option value="${s.id}">${s.id} ${esc(s.name)}</option>`).join("");
   for (const o of $("e-extra").options) o.selected = (extra || []).includes(o.value);
 }
-function setDiffButtons(d) {
-  $("e-diff").innerHTML = [1, 2, 3, 4, 5].map((n) => `<button type="button" data-d="${n}" class="${n === d ? "on" : ""}">${n}</button>`).join("");
+function setDiffButtons(t) {
+  $("e-diff").innerHTML = [1, 2, 3].map((n) => `<button type="button" data-t="${n}" class="${n === t ? "on" : ""}">${TIER_NAMES[n]}</button>`).join("");
 }
-const curDiff = () => +(($("e-diff").querySelector("button.on") || {}).dataset || {}).d || null;
+const curTier = () => +(($("e-diff").querySelector("button.on") || {}).dataset || {}).t || null;
 function openReview(q) {
   current_r = q;
   $("r-empty").hidden = true; $("r-detail").hidden = false;
   setImage($("r-q-img"), q.img); setImage($("r-ms-img"), q.ms_img);
-  $("r-meta").innerHTML = `<b>${label(q)}</b> <small>${q.code}</small> · ${q.marks} marks` +
-    (q.edited ? ' <span class="badge edited">edited</span>' : q.reviewed ? ' <span class="badge reviewed">reviewed</span>' : "");
+  $("r-meta").innerHTML = `<b>${label(q)}</b> · ${q.marks} marks ` +
+    (q.edited ? '<span class="badge edited">edited</span>' : q.reviewed ? '<span class="badge checked">checked</span>' : q.low_confidence ? '<span class="badge low">low confidence</span>' : "");
   const lg = reviewLog[q.id] || [];
-  $("r-note").innerHTML = (q.low_confidence ? '<span class="low">Low confidence.</span> ' : "") + (q.review_note || "") +
+  $("r-note").innerHTML = esc(q.review_note || "") +
     (q.ms_steps != null ? ` <small>(method marks counted: ${q.ms_steps})</small>` : "") +
-    (lg.length ? "<br><small>Changed by review pass: " + lg.map((x) => `${x.field} ${x.before}→${x.after}${x.reason ? " (" + x.reason + ")" : ""}`).join("; ") + "</small>" : "");
-  $("e-topic").innerHTML = topics[q.subject].map((t) => `<option value="${t.id}">${t.id}. ${t.name}</option>`).join("");
+    (lg.length ? "<br><small>Changed by the AI review pass: " + lg.map((x) => `${x.field} ${x.before}→${x.after}${x.reason ? " (" + esc(x.reason) + ")" : ""}`).join("; ") + "</small>" : "");
+  $("e-topic").innerHTML = topics[q.subject].map((t) => `<option value="${t.id}">${t.id}. ${esc(t.name)}</option>`).join("");
   $("e-topic").value = q.topic;
   fillEditSubs(q, q.topic, q.subtopic, q.extra);
-  setDiffButtons(q.difficulty);
+  setDiffButtons(tier(q.difficulty));
   $("r-saved").textContent = "";
   renderReviewList();
   $("r-main").scrollTop = 0;
+  showViewer($("review"));
 }
 function saveOverride(patch) {
   const q = current_r; if (!q) return;
   overrides[q.id] = { ...(overrides[q.id] || {}), ...patch, ts: Date.now() };
-  ostore.save(overrides);
+  lsSet(OKEY, overrides);
   applyOverride(q);
   renderList();
 }
 function reviewStep(d) {
   if (!rShown.length) return;
   const i = rShown.findIndex((q) => current_r && q.id === current_r.id);
-  openReview(rShown[(i + d + rShown.length) % rShown.length]);
+  openReview(rShown[i < 0 ? (d > 0 ? 0 : rShown.length - 1) : (i + d + rShown.length) % rShown.length]);
 }
 function setupReview() {
-  for (const id of ["r-filter", "r-level", "r-subject"]) $(id).addEventListener("change", renderReviewList);
-  $("r-search").addEventListener("input", renderReviewList);
-  $("r-list").addEventListener("click", (e) => { const li = e.target.closest("li"); if (li) openReview(rShown[+li.dataset.i]); });
+  const refresh = () => renderReviewList(true);
+  for (const id of ["r-filter", "r-level", "r-subject", "r-paper", "r-year"]) $(id).addEventListener("change", refresh);
+  $("r-list").addEventListener("click", (e) => {
+    if (e.target.closest("[data-more]")) { rListLimit += PAGE; renderReviewList(); return; }
+    const li = e.target.closest("li[data-i]"); if (li) openReview(rShown[+li.dataset.i]);
+  });
+  $("r-list-toggle").onclick = () => toggleList($("review"));
+  $("r-list-close").onclick = () => $("review").classList.remove("list-open");
   $("e-topic").addEventListener("change", () => fillEditSubs(current_r, $("e-topic").value, null, []));
-  $("e-diff").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setDiffButtons(+b.dataset.d); });
+  $("e-diff").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setDiffButtons(+b.dataset.t); });
   $("r-ok").onclick = () => {
     const i = rShown.findIndex((q) => q.id === current_r.id), nextQ = rShown[i + 1];  // pick the next item before the list changes
     saveOverride({ reviewed: true });
-    if (nextQ) openReview(nextQ); else { openReview(current_r); }
-    $("r-saved").textContent = "Marked as reviewed.";
+    if (nextQ) openReview(nextQ); else openReview(current_r);
+    $("r-saved").textContent = "Marked as checked.";
   };
   $("r-save").onclick = () => {
     const extra = [...$("e-extra").selectedOptions].map((o) => o.value).filter((v) => v !== $("e-sub").value);
-    saveOverride({ topic: $("e-topic").value, subtopic: $("e-sub").value, extra, difficulty: curDiff() || current_r.difficulty, reviewed: true });
+    saveOverride({ topic: $("e-topic").value, subtopic: $("e-sub").value, extra, difficulty: tierToDiff(curTier() || tier(current_r.difficulty), current_r.difficulty), reviewed: true });
     openReview(current_r);
     $("r-saved").textContent = "Saved.";
   };
-  $("r-reset").onclick = () => { delete overrides[current_r.id]; ostore.save(overrides); applyOverride(current_r); openReview(current_r); renderList(); $("r-saved").textContent = "Reset to the original tags."; };
+  $("r-reset").onclick = () => { delete overrides[current_r.id]; lsSet(OKEY, overrides); applyOverride(current_r); openReview(current_r); renderList(); $("r-saved").textContent = "Reset to the original tags."; };
   $("r-prev").onclick = () => reviewStep(-1); $("r-next").onclick = () => reviewStep(1);
   $("edit-tags").onclick = () => {
     if (!current) return;
-    $("r-filter").value = "all"; $("r-level").value = ""; $("r-subject").value = ""; $("r-search").value = current.code;
+    $("r-filter").value = "all"; $("r-subject").value = current.subject; $("r-level").value = current.level;
+    $("r-paper").value = String(current.paper); $("r-year").value = String(current.year);
     showView("review"); openReview(current);
   };
   document.addEventListener("keydown", (e) => {
-    if ($("review").hidden || !current_r || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if ($("review").hidden || !current_r || typing(e) || !$("settings").hidden) return;
     if (e.key === "ArrowRight") reviewStep(1);
     else if (e.key === "ArrowLeft") reviewStep(-1);
     else if (e.key === "Enter") $("r-ok").click();
-    else if (/^[1-5]$/.test(e.key)) setDiffButtons(+e.key);
+    else if (/^[1-3]$/.test(e.key)) setDiffButtons(+e.key);
   });
+}
+
+// ---------------- settings sheet ----------------
+function openSettings() {
+  $("review-stats").textContent = `${questions.filter((q) => q.reviewed).length} of ${questions.length} questions checked · ` +
+    `${questions.filter((q) => q.edited).length} edited by you · ${Object.keys(flags).length} marked ⚑`;
+  $("settings").hidden = false;
+}
+function setupSettings() {
+  $("open-settings").onclick = openSettings;
+  $("settings-close").onclick = () => { $("settings").hidden = true; };
+  $("settings").addEventListener("click", (e) => { if (e.target === $("settings")) $("settings").hidden = true; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("settings").hidden = true; });
+  const afterChange = () => { questions.forEach(applyOverride); renderList(); renderReviewList(); if (!$("browse").hidden) renderBrowse(); openSettings(); };
   $("export-overrides").onclick = () => {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, exported_at: new Date().toISOString(), overrides }, null, 1)], { type: "application/json" }));
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, exported_at: new Date().toISOString(), overrides, flags }, null, 1)], { type: "application/json" }));
     a.download = "tag_overrides.json"; a.click();
   };
   $("import-overrides").addEventListener("change", async (e) => {
     const f = e.target.files[0]; if (!f) return;
     try {
-      const data = JSON.parse(await f.text()), incoming = data.overrides || {};
-      const ids = new Set(questions.map((q) => q.id));
-      const ok = Object.entries(incoming).filter(([id]) => ids.has(id));
-      overrides = { ...overrides, ...Object.fromEntries(ok) }; ostore.save(overrides);
-      questions.forEach(applyOverride); renderList(); renderStats();
-      alert(`Imported ${ok.length} of ${Object.keys(incoming).length} entries.`);
-    } catch { alert("That file is not a valid tag overrides export."); }
+      const data = JSON.parse(await f.text()), ids = new Set(questions.map((q) => q.id));
+      const ov = Object.entries(data.overrides || {}).filter(([id]) => ids.has(id));
+      const fl = Object.entries(data.flags || {}).filter(([id]) => ids.has(id));
+      overrides = { ...overrides, ...Object.fromEntries(ov) }; lsSet(OKEY, overrides);
+      flags = { ...flags, ...Object.fromEntries(fl) }; lsSet(FKEY, flags);
+      afterChange();
+      alert(`Imported ${ov.length} tag edits and ${fl.length} marks.`);
+    } catch { alert("That file is not a valid export from this app."); }
     e.target.value = "";
   });
+  $("clear-marks").onclick = () => { if (confirm("Remove all ⚑ review-later marks?")) { flags = {}; lsSet(FKEY, flags); updateMarkUI(); afterChange(); } };
   $("reset-overrides").onclick = () => {
-    if (confirm("Discard all your tag edits and review marks? (Export first if you want to keep them.)")) {
-      overrides = {}; ostore.save(overrides); questions.forEach(applyOverride); renderList(); renderReviewList(); renderStats();
-    }
+    if (confirm("Discard all your tag edits and checked marks? (Export first if you want to keep them.)")) { overrides = {}; lsSet(OKEY, overrides); afterChange(); }
   };
+  $("conn-box").hidden = !REMOTE;
+  $("disconnect").onclick = () => { try { localStorage.removeItem(TKEY); } catch {} location.reload(); };
+  $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
 }
-const VIEWS = ["browse", "practice", "review", "stats"];
+
+const VIEWS = ["browse", "practice", "review"];
 function showView(v) {
   if (!VIEWS.includes(v)) v = "browse";
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.view === v));
   for (const id of VIEWS) $(id).hidden = id !== v;
   try { localStorage.setItem("ibmath.view", v); } catch {}
-  if (v === "stats") renderStats();
-  if (v === "review") renderReviewList();
+  if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) $("review").classList.add("list-open"); }
   if (v === "browse") renderBrowse();
+  window.scrollTo(0, 0);
 }
 
 // ---------------- browse tab: topic index with counts ----------------
@@ -379,32 +401,32 @@ function renderBrowse() {
   const [level, subject] = bScope.split("|");
   document.querySelectorAll("#b-scope button").forEach((b) => b.classList.toggle("on", b.dataset.scope === bScope));
   const pool = questions.filter((q) => q.level === level && q.subject === subject);
-  const acc = (list) => { let g = 0, m = 0; for (const q of list) { const r = results[q.id]; if (r) { g += r.score; m += r.max; } } return m ? Math.round(100 * g / m) + "%" : "–"; };
-  const lowN = pool.filter((q) => q.low_confidence).length;
-  $("b-summary").textContent = `${pool.length} questions · ${pool.filter((q) => results[q.id]).length} attempted` + (lowN ? ` · ${lowN} with tags still uncertain` : "") +
-    " — click a subtopic to practise it.";
+  const lowN = pool.filter((q) => q.low_confidence && !q.reviewed).length, markedN = Object.keys(flags).length;
+  $("b-summary").textContent = `${pool.length} questions` + (lowN ? ` · ${lowN} with tags still uncertain` : "") + " — tap a subtopic to practise it.";
+  const mb = $("b-marked"); mb.hidden = !markedN; mb.innerHTML = `&#9873; Review marked (${markedN})`;
   $("b-cards").innerHTML = topics[subject].map((t) => {
     const tq = pool.filter((q) => q.topic === t.id);
     const rows = t.subtopics.filter((s) => level === "HL" || !s.hl_only).map((s) => {
       const sq = tq.filter((q) => q.subtopic === s.id);
-      const dist = [1, 2, 3, 4, 5].map((d) => sq.filter((q) => q.difficulty === d).length);
-      const bar = sq.length ? dist.map((n, i) => n ? `<i class="d${i + 1}" style="width:${100 * n / sq.length}%" title="Difficulty ${i + 1}: ${n}"></i>` : "").join("") : "";
-      return `<div class="srow ${sq.length ? "" : "zero"}" data-topic="${t.id}" data-sub="${s.id}"><span>${s.id} ${s.name}${s.hl_only ? '<span class="hl">HL</span>' : ""}</span>` +
-        `<span class="n">${sq.length}</span><span class="dbar">${bar}</span><span class="acc">${acc(sq)}</span></div>`;
+      const dist = [1, 2, 3].map((d) => sq.filter((q) => tier(q.difficulty) === d).length);
+      const bar = sq.length ? dist.map((n, i) => n ? `<i class="d${i + 1}" style="width:${100 * n / sq.length}%" title="${TIER_NAMES[i + 1]}: ${n}"></i>` : "").join("") : "";
+      return `<div class="srow ${sq.length ? "" : "zero"}" data-topic="${t.id}" data-sub="${s.id}"><span>${s.id} ${esc(s.name)}${s.hl_only ? '<span class="hl">HL</span>' : ""}</span>` +
+        `<span class="n">${sq.length}</span><span class="dbar">${bar}</span></div>`;
     }).join("");
-    return `<div class="card"><h3 data-topic="${t.id}" style="cursor:pointer">${t.id}. ${t.name}<small>${tq.length} questions</small></h3>${rows}</div>`;
+    return `<div class="card"><h3 data-topic="${t.id}">${t.id}. ${esc(t.name)}<small>${tq.length} questions</small></h3>${rows}</div>`;
   }).join("");
 }
-function goPractice({ level, subject, topic, sub }) {
+function goPractice({ level, subject, topic, sub, marked }) {
+  for (const id of FILTER_IDS) $(id).value = "";
+  $("f-qnum").value = ""; $("f-marked").checked = !!marked;
   $("f-level").value = level || ""; $("f-subject").value = subject || "";
   refreshTopicFilters(); $("f-topic").value = topic || ""; refreshSubtopics();
-  if (sub) {
-    const name = subName(subject, sub);
-    $("f-subtopic").value = name || "";
-  }
-  $("f-search").value = ""; $("f-qnum").value = ""; $("f-year").value = ""; $("f-month").value = ""; $("f-paper").value = ""; $("f-tz").value = ""; $("f-status").value = "";
-  showView("practice"); renderList();
+  if (sub) $("f-subtopic").value = subName(subject, sub) || "";
+  $("filterbar").classList.remove("open"); $("fb-toggle").innerHTML = "Filters &#9662;";
+  current = null; $("question").hidden = true; $("empty").hidden = false;
+  showView("practice"); renderList(true);
   if (shown.length) openQuestion(shown[0]);
+  else if (isNarrow()) $("p-body").classList.add("list-open");
 }
 function setupBrowse() {
   $("b-scope").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { bScope = b.dataset.scope; try { localStorage.setItem("ibmath.scope", bScope); } catch {} renderBrowse(); } });
@@ -414,14 +436,39 @@ function setupBrowse() {
     if (row && !row.classList.contains("zero")) goPractice({ level, subject, topic: row.dataset.topic, sub: row.dataset.sub });
     else if (head) goPractice({ level, subject, topic: head.dataset.topic });
   });
+  $("b-marked").onclick = () => goPractice({ marked: true });
+}
+function setupPractice() {
+  const fbOpen = () => { const o = $("filterbar").classList.toggle("open"); $("fb-toggle").setAttribute("aria-expanded", String(o)); $("fb-toggle").innerHTML = o ? "Filters &#9652;" : "Filters &#9662;"; };
+  $("fb-toggle").onclick = fbOpen; $("fb-summary").onclick = fbOpen;
   const more = $("more-toggle");
-  more.onclick = () => { const h = $("more-filters").hidden; $("more-filters").hidden = !h; more.setAttribute("aria-expanded", String(h)); more.innerHTML = h ? "More filters &#9652;" : "More filters &#9662;"; };
+  more.onclick = () => { const h = $("more-filters").hidden; $("more-filters").hidden = !h; more.setAttribute("aria-expanded", String(h)); more.innerHTML = h ? "More &#9652;" : "More &#9662;"; };
   $("clear-filters").onclick = () => {
-    for (const id of ["f-level", "f-subject", "f-topic", "f-subtopic", "f-status", "f-year", "f-month", "f-paper", "f-tz"]) $(id).value = "";
-    $("f-search").value = ""; $("f-qnum").value = ""; $("f-dmin").value = 1; $("f-dmax").value = 5;
-    refreshTopicFilters(); renderList();
+    for (const id of FILTER_IDS) $(id).value = "";
+    $("f-qnum").value = ""; $("f-marked").checked = false;
+    refreshTopicFilters(); onFilters();
   };
-  $("list-toggle").onclick = () => { const c = $("p-body").classList.toggle("collapsed"); $("list-toggle").textContent = c ? "»" : "«"; };
+  for (const id of FILTER_IDS) $(id).addEventListener("change", () => { if (id === "f-subject") refreshTopicFilters(); else if (id === "f-topic") refreshSubtopics(); onFilters(); });
+  $("f-marked").addEventListener("change", onFilters);
+  $("f-qnum").addEventListener("input", onFilters);
+  $("list").addEventListener("click", (e) => {
+    if (e.target.closest("[data-more]")) { listLimit += PAGE; renderList(); return; }
+    const li = e.target.closest("li[data-i]"); if (li) openQuestion(shown[+li.dataset.i]);
+  });
+  $("list-toggle").onclick = () => toggleList($("p-body"));
+  $("p-list-close").onclick = () => $("p-body").classList.remove("list-open");
+  $("random").onclick = () => { if (shown.length) openQuestion(shown[Math.floor(Math.random() * shown.length)]); };
+  $("prev").onclick = $("prev2").onclick = () => step(-1);
+  $("next").onclick = $("next2").onclick = () => step(1);
+  $("mark").onclick = $("mark2").onclick = toggleMark;
+  $("toggle-ms").onclick = () => { const h = $("ms-img").hidden; $("ms-img").hidden = !h; $("toggle-ms").textContent = h ? "Hide markscheme" : "Show markscheme"; };
+  $("toggle-sol").onclick = toggleSolution;
+  document.addEventListener("keydown", (e) => {
+    if ($("practice").hidden || typing(e) || !$("settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "ArrowRight") step(1);
+    else if (e.key === "ArrowLeft") step(-1);
+    else if (e.key === "m" || e.key === "M") toggleMark();
+  });
 }
 
 async function loadData() {
@@ -443,34 +490,12 @@ async function init() {
   }
   await connectCard();
   questions.forEach(applyOverride);
-  const dsel = (id, v) => { $(id).innerHTML = [1, 2, 3, 4, 5].map((n) => `<option>${n}</option>`).join(""); $(id).value = v; };
-  dsel("f-dmin", 1); dsel("f-dmax", 5);
-  fillSelect($("f-year"), [...new Set(questions.map((q) => q.year))].sort().map((y) => [String(y), String(y)]));
+  const years = [...new Set(questions.map((q) => q.year))].sort().map((y) => [String(y), String(y)]);
+  fillSelect($("f-year"), years); fillSelect($("r-year"), years);
   refreshTopicFilters();
-  for (const id of ["f-level", "f-subject", "f-paper", "f-subtopic", "f-dmin", "f-dmax", "f-year", "f-month", "f-tz", "f-status"])
-    $(id).addEventListener("change", () => { if (id === "f-subject") refreshTopicFilters(); renderList(); });
-  $("f-topic").addEventListener("change", () => { refreshSubtopics(); renderList(); });
-  for (const id of ["f-search", "f-qnum"]) $(id).addEventListener("input", renderList);
-  $("list").addEventListener("click", (e) => { const li = e.target.closest("li"); if (li) openQuestion(shown[+li.dataset.i]); });
-  $("random").onclick = () => { if (shown.length) openQuestion(shown[Math.floor(Math.random() * shown.length)]); };
-  $("toggle-ms").onclick = () => { const h = $("ms-img").hidden; $("ms-img").hidden = !h; $("toggle-ms").textContent = h ? "Hide markscheme" : "Show markscheme"; };
-  $("save").onclick = save; $("next").onclick = next; $("toggle-sol").onclick = toggleSolution;
   document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showView(b.dataset.view));
-  setupReview(); setupBrowse();
-  $("export").onclick = () => {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(results, null, 1)], { type: "application/json" }));
-    a.download = "ib-math-progress.json"; a.click();
-  };
-  $("import-progress").onchange = (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    f.text().then((t) => { const r = JSON.parse(t); if (r && typeof r === "object") { results = { ...results, ...r }; store.save(results); renderStats(); renderList(); } }).catch(() => alert("Not a valid progress file."));
-  };
-  $("conn-box").hidden = !REMOTE;
-  $("disconnect").onclick = () => { try { localStorage.removeItem(TKEY); } catch {} location.reload(); };
-  $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
-  $("reset").onclick = () => { if (confirm("Delete all saved progress?")) { results = {}; store.save(results); renderStats(); renderList(); } };
-  renderList();
+  setupPractice(); setupReview(); setupBrowse(); setupSettings();
+  renderList(true);
   try { bScope = localStorage.getItem("ibmath.scope") || bScope; } catch {}
   let v = "browse"; try { v = localStorage.getItem("ibmath.view") || "browse"; } catch {}
   showView(v);

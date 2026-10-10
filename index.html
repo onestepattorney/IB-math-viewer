@@ -23,19 +23,44 @@
     <p id="c-msg" aria-live="polite"></p>
   </div>
 </div>
+
+<div id="settings" class="overlay" hidden>
+  <div class="sheet" role="dialog" aria-label="Settings">
+    <div class="sheet-head"><h2>Settings</h2><button id="settings-close" aria-label="Close">&times;</button></div>
+    <p id="review-stats" class="muted"></p>
+    <h3>Backup</h3>
+    <p class="muted">Your tag edits and &#9873; review-later marks live in this browser only. Export them to keep a copy or move them to another device.</p>
+    <div class="row">
+      <button id="export-overrides">Export my data</button>
+      <label class="file btn">Import <input id="import-overrides" type="file" accept="application/json"></label>
+    </div>
+    <h3>Reset</h3>
+    <div class="row">
+      <button id="clear-marks">Clear all &#9873; marks</button>
+      <button id="reset-overrides">Discard all my tag edits</button>
+    </div>
+    <div id="conn-box" hidden>
+      <h3>Connection</h3>
+      <div class="row">
+        <button id="disconnect">Disconnect (forget token)</button>
+        <button id="clear-cache">Clear cached images</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <header>
   <h1>IB Math Practice</h1>
   <nav>
     <button data-view="browse" class="active">Browse</button>
     <button data-view="practice">Practice</button>
-    <button data-view="review">Review tags</button>
-    <button data-view="stats">Progress</button>
+    <button data-view="review">Tag editor</button>
   </nav>
+  <button id="open-settings" class="icon-btn" aria-label="Settings" title="Settings">&#9881;</button>
 </header>
 
 <main id="browse">
   <div class="topbar">
-    <span class="muted">Course</span>
     <div id="b-scope" class="seg">
       <button data-scope="HL|AA">HL Analysis &amp; Approaches</button>
       <button data-scope="SL|AA">SL Analysis &amp; Approaches</button>
@@ -43,52 +68,62 @@
       <button data-scope="SL|AI">SL Applications &amp; Interpretation</button>
     </div>
   </div>
-  <p id="b-summary" class="muted"></p>
+  <div class="b-sum">
+    <p id="b-summary" class="muted"></p>
+    <button id="b-marked" hidden></button>
+  </div>
   <div id="b-cards"></div>
 </main>
 
 <main id="practice" hidden>
   <div id="filterbar">
-    <label>Course
-      <select id="f-subject"><option value="">All</option><option value="AA">Analysis &amp; Approaches</option><option value="AI">Applications &amp; Interpretation</option></select></label>
-    <label>Level
-      <select id="f-level"><option value="">All</option><option>HL</option><option>SL</option></select></label>
-    <label>Topic
-      <select id="f-topic"><option value="">All</option></select></label>
-    <label class="wide">Subtopic
-      <select id="f-subtopic"><option value="">All</option></select></label>
-    <label>Difficulty
-      <span class="range"><select id="f-dmin"></select> to <select id="f-dmax"></select></span></label>
-    <label>Status
-      <select id="f-status">
-        <option value="">All</option><option value="new">Not attempted</option>
-        <option value="wrong">Needs review (&lt;100%)</option><option value="done">Full marks</option></select></label>
-    <span class="grow"></span>
-    <button id="more-toggle" aria-expanded="false">More filters &#9662;</button>
-    <button id="clear-filters">Clear filters</button>
-    <button id="random">Random question</button>
-    <div id="more-filters" hidden>
-      <label>Search
-        <input id="f-search" type="search" placeholder="e.g. 2023 may p2 tz1 q7 or tangents"></label>
+    <div class="fb-head">
+      <button id="fb-toggle" aria-expanded="false" aria-controls="fb-body">Filters &#9662;</button>
+      <span id="fb-summary" class="muted"></span>
+      <button id="clear-filters">Clear</button>
+    </div>
+    <div class="fb-body" id="fb-body">
+      <label>Course
+        <select id="f-subject"><option value="">All</option><option value="AA">Analysis &amp; Approaches</option><option value="AI">Applications &amp; Interpretation</option></select></label>
+      <label>Level
+        <select id="f-level"><option value="">All</option><option>HL</option><option>SL</option></select></label>
+      <label class="full-m">Topic
+        <select id="f-topic"><option value="">All</option></select></label>
+      <label class="wide">Subtopic
+        <select id="f-subtopic"><option value="">All</option></select></label>
+      <label>Paper
+        <select id="f-paper"><option value="">All</option><option value="1">Paper 1</option><option value="2">Paper 2</option><option value="3">Paper 3</option></select></label>
+      <label>Difficulty
+        <select id="f-diff"><option value="">All</option><option value="1">Easy</option><option value="2">Medium</option><option value="3">Hard</option></select></label>
       <label>Year
         <select id="f-year"><option value="">All</option></select></label>
       <label>Month
         <select id="f-month"><option value="">All</option><option>May</option><option>November</option></select></label>
-      <label>Paper
-        <select id="f-paper"><option value="">All</option><option>1</option><option>2</option><option>3</option></select></label>
-      <label>Time zone
-        <select id="f-tz"><option value="">All</option><option>TZ0</option><option>TZ1</option><option>TZ2</option><option>TZ3</option></select></label>
-      <label>Question number
-        <input id="f-qnum" type="number" min="1" placeholder="any"></label>
+      <label class="chk"><input id="f-marked" type="checkbox"> &#9873; Review-later only</label>
+      <button id="more-toggle" aria-expanded="false">More &#9662;</button>
+      <div id="more-filters" hidden>
+        <label>Time zone
+          <select id="f-tz"><option value="">All</option><option>TZ0</option><option>TZ1</option><option>TZ2</option><option>TZ3</option></select></label>
+        <label>Question number
+          <input id="f-qnum" type="number" min="1" inputmode="numeric" placeholder="any"></label>
+      </div>
     </div>
   </div>
-  <div id="p-body">
-    <aside id="p-list">
-      <div class="list-head"><span id="count"></span><button id="list-toggle" title="Hide the list">&laquo;</button></div>
+  <div id="p-body" class="split">
+    <aside id="p-list" class="side">
+      <div class="list-head"><span id="count"></span><button class="list-close" id="p-list-close">Close &times;</button></div>
       <ul id="list"></ul>
     </aside>
-    <section id="viewer">
-      <div id="empty">Pick a topic in <b>Browse</b>, or choose a question from the list.</div>
+    <section id="viewer" class="main">
+      <div class="toolbar">
+        <button id="list-toggle" title="Show or hide the question list">&#9776; <span id="list-label">List</span></button>
+        <button id="prev" aria-label="Previous question">&lsaquo; Prev</button>
+        <button id="next" aria-label="Next question">Next &rsaquo;</button>
+        <span class="grow"></span>
+        <button id="mark" class="mark-btn" aria-pressed="false">&#9873; Review later</button>
+        <button id="random" title="Open a random question from the list">Random</button>
+      </div>
+      <div id="empty">Pick a topic in <b>Browse</b>, or open the question list.</div>
       <div id="question" hidden>
         <div id="meta"></div>
         <img id="q-img" alt="Question">
@@ -97,48 +132,63 @@
           <button id="toggle-sol" hidden>Show my solution</button>
           <a id="my-sol" target="_blank" rel="noopener" hidden>Open full PDF at this page</a>
           <span id="no-sol" class="muted" hidden>No solution PDF for this paper</span>
-          <button id="edit-tags" title="Open this question in the tag review editor">Edit tags</button>
           <span class="grow"></span>
-          <label>Marks awarded <input id="score" type="number" min="0" value="0"> / <span id="max"></span></label>
-          <button id="save">Save result</button>
-          <button id="next">Next</button>
+          <button id="edit-tags" title="Fix this question's topic, subtopic or difficulty">Edit tags</button>
         </div>
-        <div id="saved" aria-live="polite"></div>
         <img id="ms-img" alt="Markscheme" hidden>
         <div id="sol-panel" hidden>
           <p id="sol-note" class="muted"></p>
           <img id="sol-img" alt="My solution">
+        </div>
+        <div class="actions bottom-nav">
+          <button id="prev2">&lsaquo; Prev</button>
+          <span class="grow"></span>
+          <button id="mark2" class="mark-btn" aria-pressed="false">&#9873; Review later</button>
+          <span class="grow"></span>
+          <button id="next2">Next &rsaquo;</button>
         </div>
       </div>
     </section>
   </div>
 </main>
 
-<main id="review" hidden>
-  <aside id="r-side">
-    <label>Show
-      <select id="r-filter">
-        <option value="low">Low confidence</option>
-        <option value="unreviewed">Not reviewed yet</option>
-        <option value="changed">Changed by review pass</option>
-        <option value="edited">Edited by me</option>
-        <option value="all">All questions</option>
-      </select></label>
-    <label>Level
-      <select id="r-level"><option value="">All</option><option>HL</option><option>SL</option></select></label>
-    <label>Course
-      <select id="r-subject"><option value="">All</option><option value="AA">Analysis &amp; Approaches</option><option value="AI">Applications &amp; Interpretation</option></select></label>
-    <label>Search
-      <input id="r-search" type="search" placeholder="e.g. 2023 may p2 tz1 q7"></label>
-    <p id="r-count"></p>
-    <progress id="r-progress" max="1" value="0"></progress>
+<main id="review" class="split" hidden>
+  <aside id="r-side" class="side">
+    <div class="list-head"><span id="r-count"></span><button class="list-close" id="r-list-close">Close &times;</button></div>
+    <div id="r-filters">
+      <label>Show
+        <select id="r-filter">
+          <option value="low">Low confidence</option>
+          <option value="unchecked">Not checked yet</option>
+          <option value="changed">Changed by AI review pass</option>
+          <option value="edited">Edited by me</option>
+          <option value="all">All questions</option>
+        </select></label>
+      <label>Course
+        <select id="r-subject"><option value="">All</option><option value="AA">Analysis &amp; Approaches</option><option value="AI">Applications &amp; Interpretation</option></select></label>
+      <label>Level
+        <select id="r-level"><option value="">All</option><option>HL</option><option>SL</option></select></label>
+      <label>Paper
+        <select id="r-paper"><option value="">All</option><option value="1">Paper 1</option><option value="2">Paper 2</option><option value="3">Paper 3</option></select></label>
+      <label>Year
+        <select id="r-year"><option value="">All</option></select></label>
+    </div>
     <ul id="r-list"></ul>
   </aside>
-  <section id="r-main">
-    <div id="r-empty">Pick a question from the list.</div>
+  <section id="r-main" class="main">
+    <div class="toolbar">
+      <button id="r-list-toggle" title="Show or hide the question list">&#9776; <span id="r-list-label">List</span></button>
+      <button id="r-prev" aria-label="Previous question">&lsaquo; Prev</button>
+      <button id="r-next" aria-label="Next question">Next &rsaquo;</button>
+    </div>
+    <div id="r-empty">Open the question list and pick a question.</div>
     <div id="r-detail" hidden>
       <div id="r-meta"></div>
       <div id="r-note"></div>
+      <div id="r-images">
+        <div><h3>Question</h3><img id="r-q-img" alt="Question"></div>
+        <div><h3>Markscheme</h3><img id="r-ms-img" alt="Markscheme"></div>
+      </div>
       <div id="r-edit">
         <label>Topic <select id="e-topic"></select></label>
         <label>Subtopic <select id="e-sub"></select></label>
@@ -149,32 +199,10 @@
         <button id="r-ok">Looks right (Enter)</button>
         <button id="r-save">Save changes</button>
         <button id="r-reset">Reset to original</button>
-        <span class="grow"></span>
-        <button id="r-prev">&larr; Previous</button>
-        <button id="r-next">Next &rarr;</button>
       </div>
       <div id="r-saved" aria-live="polite"></div>
-      <div id="r-images"><div><h3>Question</h3><img id="r-q-img" alt="Question"></div><div><h3>Markscheme</h3><img id="r-ms-img" alt="Markscheme"></div></div>
     </div>
   </section>
-</main>
-
-<main id="stats" hidden>
-  <h2>Progress by topic</h2>
-  <table id="stats-table"></table>
-  <button id="export">Export progress (JSON)</button>
-  <label class="file">Import progress <input id="import-progress" type="file" accept="application/json"></label>
-  <button id="reset">Reset progress</button>
-  <div id="conn-box" hidden>
-    <h2>Connection</h2>
-    <button id="disconnect">Disconnect (forget token)</button>
-    <button id="clear-cache">Clear cached images</button>
-  </div>
-  <h2>Tag review</h2>
-  <p id="review-stats"></p>
-  <button id="export-overrides">Export tag overrides (JSON)</button>
-  <label class="file">Import tag overrides <input id="import-overrides" type="file" accept="application/json"></label>
-  <button id="reset-overrides">Discard all my tag edits</button>
 </main>
 <script src="data/config.js"></script>
 <script src="data/data.js"></script>
