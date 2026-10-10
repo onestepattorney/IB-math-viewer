@@ -2,7 +2,7 @@
 window.IB_REMOTE = {
  "owner": "onestepattorney",
  "repo": "IB-math",
- "ref": "claude/festive-keller-120hqw",
+ "ref": "main",
  "base": "app/",
  "apiBase": "https://api.github.com"
 };
