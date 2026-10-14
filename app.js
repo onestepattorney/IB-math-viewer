@@ -248,9 +248,10 @@ function openQuestion(q) {
   showViewer($("p-body"));
 }
 // The markscheme sits next to the question (below it on a phone) and stays covered until asked for.
+function updateCover() { $("ms-cover").hidden = !$("ms-img").hidden || !$("sol-panel").hidden; }
 function showMs(on) {
-  $("ms-img").hidden = !on; $("ms-cover").hidden = on;
-  $("toggle-ms").textContent = on ? "Hide" : "Show markscheme";
+  $("ms-img").hidden = !on; updateCover();
+  $("toggle-ms").textContent = on ? "Hide markscheme" : "Show markscheme";
   $("toggle-ms").classList.toggle("primary", !on);
 }
 function step(d) {
@@ -274,15 +275,12 @@ function toggleMark() {
 }
 
 // ---- own solution PDF (data/solutions/*.pdf), opened at the page where the question starts ----
-function solutionUrl(q) { return q.my_solution + (q.my_solution_pages ? "#page=" + q.my_solution_pages[0] : ""); }
 function setupSolution(q) {
   const has = !!q.my_solution;
-  $("toggle-sol").hidden = !has; $("my-sol").hidden = !has; $("no-sol").hidden = has;
+  $("toggle-sol").hidden = !has; $("no-sol").hidden = has;
   $("toggle-sol").textContent = "Show my solution";
-  $("sol-panel").hidden = true; setImage($("sol-img"), null);
+  $("sol-panel").hidden = true; setImage($("sol-img"), null); $("toggle-sol").classList.add("primary"); updateCover();
   if (!has) return;
-  $("my-sol").href = REMOTE ? "#" : solutionUrl(q);
-  $("my-sol").onclick = REMOTE ? (e) => { e.preventDefault(); openAsset(q.my_solution, q.my_solution_pages ? "#page=" + q.my_solution_pages[0] : ""); } : null;
   const p = q.my_solution_pages;
   $("sol-note").textContent = p ? `My solution for this question only (PDF page${p[0] === p[1] ? " " + p[0] : "s " + p[0] + "–" + p[1]} of ${p[2]}).` : "";
 }
@@ -291,7 +289,9 @@ function toggleSolution() {
   const panel = $("sol-panel"), show = panel.hidden;
   panel.hidden = !show;
   $("toggle-sol").textContent = show ? "Hide my solution" : "Show my solution";
-  if (show) { setImage($("sol-img"), current.my_solution_img || null); panel.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  $("toggle-sol").classList.toggle("primary", !show);
+  if (show) setImage($("sol-img"), current.my_solution_img || null);
+  updateCover();
 }
 
 // ---------------- tag editor ----------------

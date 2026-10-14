@@ -95,6 +95,8 @@ nav button.active{border-color:var(--acc);color:var(--acc);font-weight:600}
 #ms-cover{border:1px dashed var(--line);border-radius:6px;padding:40px 16px;text-align:center;color:var(--mute);font-size:13px}
 #ms-img{max-width:100%;background:#fff;border:1px solid var(--line);border-radius:6px;display:block}
 #sol-panel{margin-top:12px}
+#sol-panel img{max-width:100%;background:#fff;border:1px solid var(--line);border-radius:6px;display:block}
+.pane h3{flex-wrap:wrap}
 .bottom-nav{margin-top:20px;padding-top:12px;border-top:1px solid var(--line)}
 .tier{font-size:11px;padding:1px 8px;border-radius:9px;border:1px solid var(--line)}
 .tier.t1{border-color:#16a34a;color:#16a34a}.tier.t2{border-color:#ca8a04;color:#ca8a04}.tier.t3{border-color:#dc2626;color:#dc2626}

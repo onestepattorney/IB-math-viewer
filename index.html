@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css?v=202610140149">
+<link rel="stylesheet" href="style.css?v=202610140205">
 </head>
 <body>
 <div id="boot-msg" style="padding:14px 20px;background:#fef3c7;color:#78350f;font:14px system-ui,sans-serif">Loading&hellip; If this yellow message stays, the files next to this page are missing (style.css, app.js, data/). Extract or clone the <b>whole</b> repository folder &mdash; do not copy index.html on its own &mdash; and open <code>app/index.html</code> from inside it.</div>
@@ -142,19 +142,18 @@
         <div id="panes">
           <div class="pane"><h3>Question</h3><img id="q-img" alt="Question"></div>
           <div class="pane" id="ms-pane">
-            <h3>Markscheme <button id="toggle-ms">Show markscheme</button></h3>
+            <h3>
+              <button id="toggle-ms">Show markscheme</button>
+              <button id="toggle-sol" hidden>Show my solution</button>
+              <span id="no-sol" class="muted" hidden>No solution PDF for this paper</span>
+            </h3>
             <div id="ms-cover">Try the question first, then press <b>Show markscheme</b>.</div>
             <img id="ms-img" alt="Markscheme" hidden>
+            <div id="sol-panel" hidden>
+              <p id="sol-note" class="muted"></p>
+              <img id="sol-img" alt="My solution">
+            </div>
           </div>
-        </div>
-        <div class="actions">
-          <button id="toggle-sol" hidden>Show my solution</button>
-          <a id="my-sol" target="_blank" rel="noopener" hidden>Open full PDF at this page</a>
-          <span id="no-sol" class="muted" hidden>No solution PDF for this paper</span>
-        </div>
-        <div id="sol-panel" hidden>
-          <p id="sol-note" class="muted"></p>
-          <img id="sol-img" alt="My solution">
         </div>
         <div class="actions bottom-nav">
           <button id="prev2">&lsaquo; Prev</button>
@@ -218,8 +217,8 @@
     </div>
   </section>
 </main>
-<script src="data/config.js?v=202610140149"></script>
-<script src="data/data.js?v=202610140149"></script>
-<script src="app.js?v=202610140149"></script>
+<script src="data/config.js?v=202610140205"></script>
+<script src="data/data.js?v=202610140205"></script>
+<script src="app.js?v=202610140205"></script>
 </body>
 </html>
