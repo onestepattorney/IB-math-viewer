@@ -277,7 +277,7 @@ function toggleMark() {
 // ---- own solution PDF (data/solutions/*.pdf), opened at the page where the question starts ----
 function setupSolution(q) {
   const has = !!q.my_solution;
-  $("toggle-sol").hidden = !has; $("no-sol").hidden = has;
+  $("toggle-sol").hidden = !has;
   $("toggle-sol").textContent = "Show my solution";
   $("sol-panel").hidden = true; setImage($("sol-img"), null); $("toggle-sol").classList.add("primary"); updateCover();
   if (!has) return;
