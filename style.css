@@ -89,7 +89,11 @@ nav button.active{border-color:var(--acc);color:var(--acc);font-weight:600}
 #question img,#r-detail img{max-width:100%;background:#fff;border:1px solid var(--line);border-radius:6px;display:block}
 .actions{display:flex;gap:10px;align-items:center;margin:12px 0;flex-wrap:wrap}
 .actions a{color:var(--acc)}
-#ms-img{margin-top:10px}
+#panes{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.pane{min-width:0}
+.pane h3{margin:0 0 6px;font-size:13px;color:var(--mute);display:flex;align-items:center;gap:10px;min-height:36px}
+#ms-cover{border:1px dashed var(--line);border-radius:6px;padding:40px 16px;text-align:center;color:var(--mute);font-size:13px}
+#ms-img{max-width:100%;background:#fff;border:1px solid var(--line);border-radius:6px;display:block}
 #sol-panel{margin-top:12px}
 .bottom-nav{margin-top:20px;padding-top:12px;border-top:1px solid var(--line)}
 .tier{font-size:11px;padding:1px 8px;border-radius:9px;border:1px solid var(--line)}
@@ -175,7 +179,8 @@ img.failed{cursor:pointer;color:#b91c1c}
 
   #r-edit{grid-template-columns:1fr;order:0}
   #r-detail>.actions,#r-saved,#r-images{order:0}
-  #r-images{grid-template-columns:1fr}
+  #r-images,#panes{grid-template-columns:1fr}
+  #ms-cover{padding:16px}
   #r-detail>.actions{position:sticky;bottom:0;background:var(--bg);padding:10px 0;margin:0;border-top:1px solid var(--line);z-index:4}
 }
 @media(max-width:520px){h1{display:none}}

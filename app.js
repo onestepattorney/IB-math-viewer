@@ -196,7 +196,7 @@ function updateDraftUI() { // live count on the button + a line saying which fil
 function setFiltersOpen(o) { $("filterbar").classList.toggle("open", o); $("fb-toggle").setAttribute("aria-expanded", String(o)); $("fb-toggle").innerHTML = o ? "Filters &#9652;" : "Filters &#9662;"; }
 function clearViewer() {
   current = null; $("question").hidden = true; $("empty").hidden = false; $("now").textContent = "";
-  setImage($("q-img"), null); setImage($("ms-img"), null); $("ms-img").hidden = true; setImage($("sol-img"), null); updateMarkUI();
+  setImage($("q-img"), null); setImage($("ms-img"), null); showMs(false); setImage($("sol-img"), null); updateMarkUI();
 }
 function applyFilters({ first = false } = {}) {
   applied = readDraft(); appliedText = draftText();
@@ -235,9 +235,8 @@ function renderList(reset) {
 function openQuestion(q) {
   current = q;
   $("empty").hidden = true; $("question").hidden = false;
-  setImage($("q-img"), q.img); setImage($("ms-img"), q.ms_img); $("ms-img").hidden = true;
+  setImage($("q-img"), q.img); setImage($("ms-img"), q.ms_img); showMs(false);
   const nx = shown[shown.findIndex((x) => x.id === q.id) + 1]; if (nx) prefetch([nx.img]);
-  $("toggle-ms").textContent = "Show markscheme";
   $("meta").innerHTML = `<b>${label(q)}</b> <span>${q.marks} marks${q.section ? " · Section " + esc(q.section) : ""}</span>` +
     (q.topic_name ? ` <span>${esc(q.topic_name)} › ${esc(q.subtopic_name)}</span> ${tierPill(q)}` : "") +
     (q.edited ? ' <span class="badge edited">edited</span>' : "");
@@ -247,6 +246,12 @@ function openQuestion(q) {
   renderList();
   $("viewer").scrollTop = 0;
   showViewer($("p-body"));
+}
+// The markscheme sits next to the question (below it on a phone) and stays covered until asked for.
+function showMs(on) {
+  $("ms-img").hidden = !on; $("ms-cover").hidden = on;
+  $("toggle-ms").textContent = on ? "Hide" : "Show markscheme";
+  $("toggle-ms").classList.toggle("primary", !on);
 }
 function step(d) {
   if (!shown.length) return;
@@ -517,7 +522,7 @@ function setupPractice() {
   $("prev").onclick = $("prev2").onclick = () => step(-1);
   $("next").onclick = $("next2").onclick = () => step(1);
   $("mark").onclick = $("mark2").onclick = toggleMark;
-  $("toggle-ms").onclick = () => { const h = $("ms-img").hidden; $("ms-img").hidden = !h; $("toggle-ms").textContent = h ? "Hide markscheme" : "Show markscheme"; };
+  $("toggle-ms").onclick = () => showMs($("ms-img").hidden);
   $("toggle-sol").onclick = toggleSolution;
   document.addEventListener("keydown", (e) => {
     if ($("practice").hidden || typing(e) || !$("settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
