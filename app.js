@@ -407,9 +407,19 @@ function toggleVideo() {
   if (show) { vPos = { s: 0, i: 0 }; vRender(0, 0); vSetPlay(false); vSceneLabel(); } else { vStop(); vClearHl(); vInkClear(); }
 }
 function vInitVoices() { if (window.speechSynthesis) vVoices = speechSynthesis.getVoices(); }
+// Phones (iOS Safari above all) allow speech only when the first speak() runs inside the tap itself, and often give an
+// empty voice list at first: vUnlockSpeech() speaks a silent utterance during the tap that starts playing, vVoice() asks
+// for the list again, and the first sentence waits up to 1 s for it; with still no list only subtitles are shown.
+const vBadVoices = new Set(); // voices that failed on this device (Android: a network voice may fail): skipped from then on
+let vSpeechUnlocked = false, vVoicesWaited = false; // vVoicesWaited: waited once (up to 1 s) for the list
+function vUnlockSpeech() {
+  if (vSpeechUnlocked || !window.speechSynthesis) return;
+  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); vSpeechUnlocked = true; } catch {}
+}
 function vVoice(lang) {
+  if (!vVoices.length) vInitVoices();
   const pre = lang === "ko" ? ["ko"] : ["en-US", "en-GB", "en"];
-  for (const p of pre) { const v = vVoices.filter((x) => x.lang && x.lang.replace("_", "-").startsWith(p)); if (v.length) return v.find((x) => !x.localService) || v[0]; }
+  for (const p of pre) { const v = vVoices.filter((x) => x.lang && x.lang.replace("_", "-").startsWith(p) && !vBadVoices.has(x.name)); if (v.length) return v.find((x) => !x.localService) || v[0]; }
   return null;
 }
 function vBuild() { // flat list of (scene, sentence) positions + chips
@@ -687,7 +697,11 @@ function vSpeak(sent, tok) { // resolves true when the sentence is finished and 
   const lang = vLang(), rate = parseFloat($("vid-rate").value) || 1;
   const text = vSayText(sent, lang);
   const est = Math.max(1500, text.length * (lang === "ko" ? 170 : 62)) / rate;
-  const voice = $("vid-voice").checked && window.speechSynthesis ? vVoice(lang) : null;
+  let voice = $("vid-voice").checked && window.speechSynthesis ? vVoice(lang) : null;
+  if (!voice && $("vid-voice").checked && window.speechSynthesis && !vVoices.length && !vVoicesWaited) { // list not ready yet (phones)
+    vVoicesWaited = true;
+    return (async () => { for (let k = 0; k < 10 && !vVoices.length; k++) { if (!(await vSleep(100, tok))) return false; vInitVoices(); } return vSpeak(sent, tok); })();
+  }
   $("vid-note").hidden = !($("vid-voice").checked && !voice);
   $("vid-note").textContent = $("vid-voice").checked && !voice ? `No ${lang === "ko" ? "Korean" : "English"} voice was found on this device, so only subtitles are shown.` : "";
   if (!voice) return vSleep(est, tok);
@@ -698,7 +712,15 @@ function vSpeak(sent, tok) { // resolves true when the sentence is finished and 
     const say = (start) => {
       const my = ++gen, u = new SpeechSynthesisUtterance(text.slice(start)); u.voice = voice; u.lang = voice.lang; u.rate = rate;
       u.onboundary = (e) => { if (my === gen && e.name !== "sentence") from = start + e.charIndex; };
-      u.onend = () => { if (my === gen) fin(tok === vTok); }; u.onerror = () => { if (my === gen) fin(false); };
+      u.onend = () => { if (my === gen) fin(tok === vTok); };
+      u.onerror = (e) => {
+        if (my !== gen) return;
+        if (e.error === "interrupted" || e.error === "canceled") { fin(false); return; } // stopped by pause or a jump
+        vBadVoices.add(voice.name); voice = vVoice(lang); // the voice failed: try the next one, else subtitles only
+        if (voice) { vAfter(() => { if (!done && tok === vTok) say(from); }, 60); return; }
+        $("vid-note").hidden = false; $("vid-note").textContent = `No working ${lang === "ko" ? "Korean" : "English"} voice on this device, so only subtitles are shown.`;
+        vCancel(fb); fb = vAfter(() => fin(tok === vTok), est);
+      };
       speechSynthesis.speak(u);
     };
     const ctl = { pause() { gen++; speechSynthesis.cancel(); }, resume() { vAfter(() => { if (!done && tok === vTok) say(from); }, 60); } };
@@ -710,6 +732,7 @@ function vSpeak(sent, tok) { // resolves true when the sentence is finished and 
 async function vRun() {
   const tok = ++vTok; vSetPlay(true);
   if (window.speechSynthesis) speechSynthesis.cancel();
+  vUnlockSpeech(); // still inside the tap/key press that started playing
   const sc = vScript.scenes;
   for (let s = vPos.s; s < sc.length; s++) {
     for (let i = s === vPos.s ? vPos.i : 0; i < sc[s].sentences.length; i++) {
