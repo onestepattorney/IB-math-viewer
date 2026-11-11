@@ -7,4 +7,4 @@ window.IB_REMOTE = {
  "apiBase": "https://api.github.com"
 };
 // Shown in Settings so you can tell which build you are running.
-window.IB_VERSION = "2026-11-11 12:11 UTC";
+window.IB_VERSION = "2026-11-11 12:20 UTC";

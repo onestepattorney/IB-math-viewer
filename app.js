@@ -28,8 +28,8 @@ function explain(status, res) {
   if (status === 404) return "File not found in the repository. Check the branch/path in data/config.js, and that the token can see the private repo.";
   return `GitHub returned HTTP ${status}.`;
 }
-async function loadAsset(rel) { // -> Blob
-  const cache = await caches.open(CACHE).catch(() => null);
+async function loadAsset(rel, fresh) { // -> Blob; fresh = skip the cache (scripts that change on the branch)
+  const cache = fresh ? null : await caches.open(CACHE).catch(() => null);
   const key = apiUrl(rel).replace(/^https:\/\/[^/]+/, "https://cache.local");
   const hit = cache && await cache.match(key);
   if (hit) return hit.blob();
@@ -82,6 +82,24 @@ async function openAsset(rel, hash) { // PDFs: open in a new tab
   const w = window.open("", "_blank");
   try { const b = await loadAsset(rel); const u = URL.createObjectURL(new Blob([b], { type: "application/pdf" })); if (w) w.location = u + (hash || ""); }
   catch (e) { if (w) w.close(); alert(e.message); }
+}
+// Link mode: private scripts (video id list and year files, hidden-band rows) come from the private repo like the images,
+// so the public shell holds code only. They are run as <script> from a blob URL; the pen-note font is loaded the same way.
+async function loadRemoteScript(rel) {
+  const text = await (await loadAsset(rel, true)).text();
+  const url = URL.createObjectURL(new Blob([text], { type: "text/javascript" }));
+  await new Promise((ok, bad) => { const el = document.createElement("script"); el.src = url; el.onload = ok; el.onerror = bad; document.head.appendChild(el); });
+  URL.revokeObjectURL(url);
+}
+async function loadRemoteExtras() { // video id list and hidden bands; the app works without them
+  if (!REMOTE || !getToken()) return;
+  await Promise.all(["data/videos/index.js", "data/qcut.js"].map((r) => loadRemoteScript(r).catch(() => {})));
+}
+let vFontDone = false;
+function vLoadFont() { // Kalam for the pen notes (style.css points at vendor/kalam/, which the public shell does not ship)
+  if (!REMOTE || vFontDone || !window.FontFace) return; vFontDone = true;
+  loadAsset("vendor/kalam/kalam-subset.woff2").then((b) => b.arrayBuffer())
+    .then((buf) => new FontFace("Kalam", buf, { weight: "400" }).load()).then((f) => document.fonts.add(f)).catch(() => { vFontDone = false; });
 }
 function prefetch(rels) { if (REMOTE && getToken()) rels.filter(Boolean).forEach((r) => loadAsset(r).catch(() => {})); }
 
@@ -353,9 +371,12 @@ function vLoadYear(id, done) {
   if (window.IB_VIDEOS && window.IB_VIDEOS[id]) return done(true);
   if (st === true) return done(false);
   if (Array.isArray(st)) { st.push(done); return; }
-  const wait = vYearState[y] = [done], el = document.createElement("script");
-  const finish = (ok) => { vYearState[y] = ok ? true : undefined; if (!ok) el.remove(); wait.forEach((f) => f(ok && !!(window.IB_VIDEOS && window.IB_VIDEOS[id]))); };
-  el.src = `data/videos/${y}.js`; el.onload = () => finish(true); el.onerror = () => finish(false);
+  const wait = vYearState[y] = [done];
+  const finish = (ok) => { vYearState[y] = ok ? true : undefined; wait.forEach((f) => f(ok && !!(window.IB_VIDEOS && window.IB_VIDEOS[id]))); };
+  vLoadFont();
+  if (REMOTE) { loadRemoteScript(`data/videos/${y}.js`).then(() => finish(true), () => finish(false)); return; }
+  const el = document.createElement("script");
+  el.src = `data/videos/${y}.js`; el.onload = () => finish(true); el.onerror = () => { el.remove(); finish(false); };
   document.head.appendChild(el);
 }
 let vCurQ = null;
@@ -1009,6 +1030,7 @@ async function init() {
     return;
   }
   await connectCard();
+  await loadRemoteExtras();
   const aside = retireStale();
   questions.forEach(applyOverride);
   const years = [...new Set(questions.map((q) => q.year))].sort().map((y) => [String(y), String(y)]);
