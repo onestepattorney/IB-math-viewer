@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css?v=202610140209">
+<link rel="stylesheet" href="style.css?v=202611111211">
 </head>
 <body>
 <div id="boot-msg" style="padding:14px 20px;background:#fef3c7;color:#78350f;font:14px system-ui,sans-serif">Loading&hellip; If this yellow message stays, the files next to this page are missing (style.css, app.js, data/). Extract or clone the <b>whole</b> repository folder &mdash; do not copy index.html on its own &mdash; and open <code>app/index.html</code> from inside it.</div>
@@ -140,14 +140,37 @@
       <div id="question" hidden>
         <div id="meta"></div>
         <div id="panes">
-          <div class="pane"><h3>Question</h3><img id="q-img" alt="Question"></div>
+          <div class="pane"><h3>Question</h3><div id="qscroll"><div id="qwrap"><img id="q-img" alt="Question"><div id="vid-hl" hidden></div><svg id="vid-ink" aria-hidden="true"></svg></div></div></div>
           <div class="pane" id="ms-pane">
             <h3>
               <button id="toggle-ms">Show markscheme</button>
               <button id="toggle-sol" hidden>Show my solution</button>
+              <button id="toggle-vid" hidden>Watch video</button>
             </h3>
             <div id="ms-cover">Try the question first, then press <b>Show markscheme</b>.</div>
             <img id="ms-img" alt="Markscheme" hidden>
+            <div id="vid-panel" hidden>
+              <div id="vid-part" class="muted"></div>
+              <div id="vid-board" aria-live="polite"></div>
+              <div id="vid-cap"></div>
+              <div id="vid-track"><input type="range" id="vid-seek" min="0" max="0" value="0" step="1" aria-label="Position in the video"><div id="vid-ticks" aria-hidden="true"></div></div>
+              <div id="vid-ctl">
+                <button id="vid-prev" title="Previous part" aria-label="Previous part">&#9198;</button>
+                <button id="vid-play" class="primary" aria-label="Play">&#9654;</button>
+                <button id="vid-next" title="Next part" aria-label="Next part">&#9197;</button>
+                <button id="vid-cc" aria-pressed="true" title="Subtitles on/off (C)">CC</button>
+                <span id="vid-scene" class="muted"></span>
+              </div>
+              <p class="muted vid-keys">Space: play / pause · ← →: back / forward · C: subtitles</p>
+              <div id="vid-chips"></div>
+              <div id="vid-opts">
+                <label>Language<select id="vid-lang"><option value="en">English</option><option value="ko">한국어</option></select></label>
+                <label>Subtitles<select id="vid-sub"><option value="same">Same as voice</option><option value="en">English</option><option value="ko">한국어</option><option value="off">Off</option></select></label>
+                <label>Speed<select id="vid-rate"><option value="0.8">0.8x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option></select></label>
+                <label class="chk"><input type="checkbox" id="vid-voice" checked> Voice</label>
+              </div>
+              <p id="vid-note" class="muted" hidden></p>
+            </div>
             <div id="sol-panel" hidden>
               <p id="sol-note" class="muted"></p>
               <img id="sol-img" alt="My solution">
@@ -216,8 +239,8 @@
     </div>
   </section>
 </main>
-<script src="data/config.js?v=202610140209"></script>
-<script src="data/data.js?v=202610140209"></script>
-<script src="app.js?v=202610140209"></script>
+<script src="data/config.js?v=202611111211"></script>
+<script src="data/data.js?v=202611111211"></script>
+<script src="app.js?v=202611111211"></script>
 </body>
 </html>

@@ -44,8 +44,26 @@ async function loadAsset(rel) { // -> Blob
   return blob;
 }
 const imgTokens = new WeakMap();
+// Question images: empty bands (page-break gaps, dotted answer boxes; data/qcut.js from tools/qcut.py) are hidden by
+// showing the image as stacked slices; the <img> itself stays (loading, retry) but is hidden while slices are shown.
+function qMapY(cuts, y) { let d = 0; for (const [a, b] of cuts) { if (y >= b) d += b - a; else if (y > a) return a - d; else break; } return y - d; }
+function buildCut(img, own) { // own: the bands to hide instead of the stored ones (a video keeps the answer space its notes use)
+  const old = img.nextElementSibling; if (old && old.classList.contains("qcut")) old.remove();
+  img.style.display = ""; img._cuts = null;
+  const cuts = img._rel && img.getAttribute("src") && (own || (window.IB_QCUT || {})[img._rel]);
+  if (!cuts || !img.naturalWidth) return;
+  const W = img.naturalWidth, H = img.naturalHeight, box = document.createElement("div"); let y = 0;
+  box.className = "qcut"; box.style.maxWidth = `min(100%, ${W}px)`;
+  for (const [a, b] of [...cuts, [H, H]]) {
+    if (a > y) { const d = document.createElement("div"), im = document.createElement("img");
+      d.style.aspectRatio = `${W} / ${a - y}`; im.src = img.src; im.alt = ""; im.style.marginTop = `${-y / W * 100}%`; d.appendChild(im); box.appendChild(d); }
+    y = b;
+  }
+  img.after(box); img.style.display = "none"; img._cuts = cuts; img._h2 = H - cuts.reduce((m, [a, b]) => m + b - a, 0);
+}
 function setImage(img, rel) {
-  if (!rel) { img.removeAttribute("src"); return; }
+  img._rel = rel; if (!img._cutL) { img._cutL = 1; img.addEventListener("load", () => buildCut(img, img.id === "q-img" && $("panes").classList.contains("vid-on") ? vVideoCuts() : undefined)); }
+  if (!rel) { img.removeAttribute("src"); buildCut(img); return; }
   if (!REMOTE) { img.src = rel; return; }
   const n = (imgTokens.get(img) || 0) + 1; imgTokens.set(img, n);
   img.removeAttribute("src"); img.alt = "Loading…"; img.classList.add("loading"); img.classList.remove("failed");
@@ -240,7 +258,7 @@ function openQuestion(q) {
   $("meta").innerHTML = `<b>${label(q)}</b> <span>${q.marks} marks${q.section ? " · Section " + esc(q.section) : ""}</span>` +
     (q.topic_name ? ` <span>${esc(q.topic_name)} › ${esc(q.subtopic_name)}</span> ${tierPill(q)}` : "") +
     (q.edited ? ' <span class="badge edited">edited</span>' : "");
-  setupSolution(q);
+  setupSolution(q); setupVideo(q);
   $("now").innerHTML = `<b>${label(q)}</b> · ${esc(q.subtopic_name || "")}${q.difficulty ? " · " + TIER_NAMES[tier(q.difficulty)] : ""}`;
   updateMarkUI();
   renderList();
@@ -248,7 +266,7 @@ function openQuestion(q) {
   showViewer($("p-body"));
 }
 // The markscheme sits next to the question (below it on a phone) and stays covered until asked for.
-function updateCover() { $("ms-cover").hidden = !$("ms-img").hidden || !$("sol-panel").hidden; }
+function updateCover() { $("ms-cover").hidden = !$("ms-img").hidden || !$("sol-panel").hidden || !$("vid-panel").hidden; }
 function showMs(on) {
   $("ms-img").hidden = !on; updateCover();
   $("toggle-ms").textContent = on ? "Hide markscheme" : "Show markscheme";
@@ -292,6 +310,447 @@ function toggleSolution() {
   $("toggle-sol").classList.toggle("primary", !show);
   if (show) setImage($("sol-img"), current.my_solution_img || null);
   updateCover();
+}
+
+
+// ---- video explanation (data/videos/<year>.js, loaded on demand; one script per question; the question image is highlighted, a board shows the maths) ----
+const VLKEY = "ib.video";
+const vPref = () => { try { return JSON.parse(localStorage.getItem(VLKEY)) || {}; } catch { return {}; } };
+const vSave = () => { try { localStorage.setItem(VLKEY, JSON.stringify({ lang: $("vid-lang").value, sub: $("vid-sub").value, rate: $("vid-rate").value, voice: $("vid-voice").checked })); } catch {} };
+// Pausable timers: pausing freezes them (and the pen animations and the voice) so playback continues exactly where it stopped.
+let vTimers = new Map(), vTid = 0, vPaused = false, vSpeech = null, vFrozen = [];
+function vAfter(fn, ms) {
+  const id = ++vTid, t = { fn, due: performance.now() + ms, left: ms, h: null }; vTimers.set(id, t);
+  if (!vPaused) t.h = setTimeout(() => { vTimers.delete(id); fn(); }, ms);
+  return id;
+}
+function vCancel(id) { const t = vTimers.get(id); if (t) { clearTimeout(t.h); vTimers.delete(id); } }
+function vCancelAll() { for (const t of vTimers.values()) clearTimeout(t.h); vTimers.clear(); }
+function vPause() {
+  vPaused = true; const now = performance.now();
+  for (const t of vTimers.values()) { clearTimeout(t.h); t.left = Math.max(0, t.due - now); }
+  vFrozen = document.getAnimations().filter((a) => { const el = a.effect && a.effect.target; return a.playState === "running" && el && el.closest && el.closest("#vid-panel, #qwrap"); });
+  vFrozen.forEach((a) => a.pause());
+  if (vSpeech) vSpeech.pause();
+  vSetPlay(false);
+}
+function vResume() {
+  vPaused = false; const now = performance.now();
+  for (const [id, t] of vTimers) { t.due = now + t.left; t.h = setTimeout(() => { vTimers.delete(id); t.fn(); }, t.left); }
+  vFrozen.forEach((a) => a.play()); vFrozen = [];
+  if (vSpeech) vSpeech.resume();
+  vSetPlay(true);
+}
+let vInkT = [], vFlat = [], vScript = null, vTok = 0, vPlaying = false, vPos = { s: 0, i: 0 }, vTimer = null, vVoices = [];
+const vOf = (q) => (window.IB_VIDEOS && q && window.IB_VIDEOS[q.id]) || null;
+// Scripts live in one file per exam year (data/videos/<year>.js, year = first four characters of the id); only the id list
+// data/videos/index.js is loaded with the page. A year file is added as a <script> (works from file://) on the first
+// "Watch video" of that year. vYearState[year] = array of waiting callbacks while loading, true when loaded.
+const vYearState = {};
+const vHas = (q) => !!(vOf(q) || (q && window.IB_VIDEO_IDS && window.IB_VIDEO_IDS.includes(q.id)));
+function vLoadYear(id, done) {
+  const y = id.slice(0, 4), st = vYearState[y];
+  if (window.IB_VIDEOS && window.IB_VIDEOS[id]) return done(true);
+  if (st === true) return done(false);
+  if (Array.isArray(st)) { st.push(done); return; }
+  const wait = vYearState[y] = [done], el = document.createElement("script");
+  const finish = (ok) => { vYearState[y] = ok ? true : undefined; if (!ok) el.remove(); wait.forEach((f) => f(ok && !!(window.IB_VIDEOS && window.IB_VIDEOS[id]))); };
+  el.src = `data/videos/${y}.js`; el.onload = () => finish(true); el.onerror = () => finish(false);
+  document.head.appendChild(el);
+}
+let vCurQ = null;
+function setupVideo(q) {
+  vCurQ = q; vStop(); vScript = vOf(q); vBuild();
+  const btn = $("toggle-vid"); btn.hidden = !vHas(q); btn.disabled = false; btn.textContent = "Watch video"; btn.classList.add("primary");
+  $("vid-panel").hidden = true; $("panes").classList.remove("vid-on"); vClearHl(); vInkClear(); updateCover();
+}
+function toggleVideo() {
+  if (!vScript) {
+    const q = vCurQ, btn = $("toggle-vid");
+    if (!vHas(q) || btn.disabled) return;
+    btn.disabled = true; btn.textContent = "Loading video…";
+    vLoadYear(q.id, (ok) => {
+      if (vCurQ !== q) return; // another question was opened meanwhile
+      btn.disabled = false; vScript = vOf(q);
+      if (!ok || !vScript) { btn.textContent = "Video could not be loaded"; return; }
+      vBuild(); btn.textContent = "Watch video"; toggleVideo();
+    });
+    return;
+  }
+  const show = $("vid-panel").hidden;
+  $("vid-panel").hidden = !show;
+  $("toggle-vid").textContent = show ? "Hide video" : "Watch video";
+  $("toggle-vid").classList.toggle("primary", !show);
+  $("panes").classList.toggle("vid-on", show); buildCut($("q-img"), show ? vVideoCuts() : undefined); if (!show) $("qscroll").scrollTop = 0; else vFitQ(true);
+  updateCover();
+  if (show) { vPos = { s: 0, i: 0 }; vRender(0, 0); vSetPlay(false); vSceneLabel(); } else { vStop(); vClearHl(); vInkClear(); }
+}
+function vInitVoices() { if (window.speechSynthesis) vVoices = speechSynthesis.getVoices(); }
+function vVoice(lang) {
+  const pre = lang === "ko" ? ["ko"] : ["en-US", "en-GB", "en"];
+  for (const p of pre) { const v = vVoices.filter((x) => x.lang && x.lang.replace("_", "-").startsWith(p)); if (v.length) return v.find((x) => !x.localService) || v[0]; }
+  return null;
+}
+function vBuild() { // flat list of (scene, sentence) positions + chips
+  vFlat = []; if (!vScript) return;
+  vScript.scenes.forEach((sc, s) => sc.sentences.forEach((_, i) => vFlat.push({ s, i })));
+  $("vid-seek").max = Math.max(0, vFlat.length - 1); $("vid-seek").value = 0;
+  $("vid-chips").innerHTML = vScript.scenes.map((sc, s) => sc.chip ? `<button type="button" data-s="${s}"></button>` : "").join("");
+  const first = []; vScript.scenes.forEach((_, s) => first.push(vFlat.findIndex((p) => p.s === s)));
+  $("vid-ticks").innerHTML = first.slice(1).map((k) => `<i style="left:${vFlat.length > 1 ? (k / (vFlat.length - 1)) * 100 : 0}%"></i>`).join("");
+  $("vid-chips").querySelectorAll("button").forEach((b) => (b.onclick = () => vSeekTo(+b.dataset.s, 0)));
+}
+function vIdx() { return vFlat.findIndex((p) => p.s === vPos.s && p.i === vPos.i); }
+function vSeekTo(s, i) {
+  const was = vPlaying; vStop(); vPos = { s, i }; vRender(s, i); vSceneLabel(); if (was) vRun();
+}
+const vLang = () => $("vid-lang").value;
+const vSubLang = () => { const s = $("vid-sub").value; return s === "same" ? vLang() : s; };
+function vShowCap(sent) {
+  const sl = vSubLang(), cap = $("vid-cap");
+  cap.classList.toggle("off", sl === "off");
+  cap.textContent = sent ? (sent[sl === "off" ? vLang() : sl] || sent.en || "") : "";
+}
+function vClearHl() { $("vid-hl").hidden = true; vHlNow = null; }
+function vBarH() { const t = $("random") && $("random").closest(".toolbar"); return t ? t.getBoundingClientRect().height : 0; } // sticky toolbar of the practice view
+function vFitQ(open) { // size the question box: it stays on screen (sticky under the toolbar) next to / above the board
+  const pn = $("panes"); if (!pn.classList.contains("vid-on")) return;
+  const top = Math.round(vBarH()) + 4, phone = innerWidth <= 800, h3 = pn.querySelector(".pane h3"), hh = h3 ? h3.getBoundingClientRect().height + 6 : 0;
+  pn.style.setProperty("--qtop", top + "px");
+  if (open && !phone) { const y = pn.getBoundingClientRect().top + scrollY - top; if (scrollY < y) window.scrollTo(0, y); } // desktop: question and board start at the top together
+  const qt = Math.max(pn.getBoundingClientRect().top, top); // where the question box starts on screen (the page may not scroll far enough)
+  pn.style.setProperty("--qmax", Math.max(200, phone ? Math.round(innerHeight * 0.38) : Math.round(innerHeight - qt - hh - 12)) + "px");
+  const p1 = pn.querySelector(".pane"); pn.style.setProperty("--vtop", (phone && p1 ? top + Math.round(p1.getBoundingClientRect().height) : top) + "px"); // the part header stays visible under the question box
+}
+addEventListener("resize", () => vFitQ()); addEventListener("scroll", () => vFitQ(), { passive: true });
+let vHlNow = null; // image rows of the highlight on screen
+function vFocus(y0, y1, smooth, must) { // must = [m0, m1]: rows that have to be visible if y0..y1 does not fit // scroll the question box (not the page) so image rows y0..y1 are in view
+  const sc = $("qscroll"), img = $("q-img"); if (!sc || !$("panes").classList.contains("vid-on") || sc.scrollHeight <= sc.clientHeight + 2) return;
+  const bar = [...document.querySelectorAll(".toolbar")].map((e) => e.getBoundingClientRect()).filter((r) => r.height && r.top <= 0.5 && r.bottom > 0).reduce((m, r) => Math.max(m, r.bottom), 0); // sticky bar covering the top
+  const R = sc.getBoundingClientRect(), off = Math.max(0, bar - R.top); // part of the box hidden above
+  const k = $("qwrap").clientHeight / vH(), a = vY(y0) * k, b = vY(y1) * k, top = sc.scrollTop + off, vh = Math.max(80, Math.min(R.bottom, innerHeight) - Math.max(R.top, bar));
+  if (must && b - a > vh - 30) return vFocus(must[0], must[1], smooth);
+  if (a >= top + 8 && b <= top + vh - 8) return;
+  const to = (b - a > vh - 40 ? a - 20 : a - Math.max(20, (vh - (b - a)) * 0.3)) - off;
+  sc.scrollTo({ top: Math.max(0, to), behavior: smooth ? "smooth" : "auto" });
+}
+function vInkY(it) { // top and bottom image rows a pen mark covers
+  if (it.box) return [it.box[1], it.box[1] + it.box[3]]; if (it.p) { const ys = it.p.filter((_, i) => i % 2); return [Math.min(...ys), Math.max(...ys)]; }
+  if (it.y1 !== undefined) return [it.y1, it.y2]; const s = it.size || 24; return it.t === "math" ? [it.y, it.y + s * 2] : [it.y - s, it.y + 4];
+}
+function vHl(box, smooth) {
+  const el = $("vid-hl");
+  if (!box || box === "none") { el.hidden = true; vHlNow = null; return; }
+  const W = vScript.size[0], H = vH(), [x, y, w, h] = box; vHlNow = [y, y + h]; vFocus(y, y + h, smooth);
+  el.style.left = (x / W * 100) + "%"; el.style.top = (vY(y) / H * 100) + "%"; el.style.width = (w / W * 100) + "%"; el.style.height = ((vY(y + h) - vY(y)) / H * 100) + "%"; el.hidden = false;
+}
+// Teacher's pen on the question image: an SVG in image pixels. Items: line, ul (underline), circle (box), brace, right (angle mark), text.
+const SVGNS = "http://www.w3.org/2000/svg";
+function vInkClear() { vInkT.forEach(vCancel); vInkT = []; $("vid-ink").innerHTML = ""; }
+function vInkEl(it) {
+  it = vMapIt(it);
+  const mk = (n, a) => { const e = document.createElementNS(SVGNS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const col = it.c || "#e03131";
+  if (it.t === "math") { // real maths (KaTeX) written in pen colour
+    const W = 700, fo = mk("foreignObject", { x: it.anchor === "end" ? it.x - W : it.x, y: it.y, width: W, height: (it.size || 22) * 4, class: "ink-math" });
+    const d = document.createElementNS("http://www.w3.org/1999/xhtml", "div"); d.style.fontSize = (it.size || 22) + "px"; d.style.color = col;
+    if (it.anchor === "end") d.style.cssFloat = "right";
+    vKatex(it.tex, d, false); fo.appendChild(d); return fo;
+  }
+  if (it.t === "text") {
+    const t = mk("text", { x: it.x, y: it.y, fill: col, "font-size": it.size || 26, class: "ink-text" + (it.anchor ? "" : ""), "text-anchor": it.anchor || "start" });
+    t.textContent = it.s; return t;
+  }
+  let d = "";
+  if (it.t === "line") { d = `M${it.p[0]},${it.p[1]}`; for (let i = 2; i + 1 < it.p.length; i += 2) d += ` L${it.p[i]},${it.p[i + 1]}`; } // p: 2 or more points (a polyline draws a curve by hand)
+  else if (it.t === "ul") { const y = it.y; d = `M${it.x1},${y} Q${(it.x1 + it.x2) / 2},${y + 4} ${it.x2},${y - 1}`; }
+  else if (it.t === "circle") { const [x, y, w, h] = it.box, cx = x + w / 2, cy = y + h / 2, rx = w / 2 + 6, ry = h / 2 + 6;
+    d = `M${cx + rx},${cy} A${rx},${ry} 0 1 1 ${cx + rx - 1},${cy - 6}`; }
+  else if (it.t === "brace") { const { x, y1, y2 } = it, s = it.side === "right" ? 1 : -1, m = (y1 + y2) / 2, w = 14 * s;
+    d = `M${x},${y1} q${w},0 ${w},12 L${x + w},${m - 10} q0,10 ${w},10 q${-w},0 ${-w},10 L${x + w},${y2 - 12} q0,12 ${-w},12`; }
+  else if (it.t === "right") { const { x, y } = it, s = it.size || 16, dx = it.dx || 1, dy = it.dy || 1; d = `M${x + s * dx},${y} L${x + s * dx},${y + s * dy} L${x},${y + s * dy}`; }
+  const p = mk("path", { d, fill: "none", stroke: col, "stroke-width": it.w || 3.5, "stroke-linecap": "round", "stroke-linejoin": "round" });
+  if (it.dash) p.setAttribute("stroke-dasharray", "9 7");
+  return p;
+}
+function vInkDraw(it, animate) {
+  const svg = $("vid-ink"), el = vInkEl(it); svg.appendChild(el);
+  if (!animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (el.tagName === "path" && !it.dash) {
+    const L = el.getTotalLength(); el.style.strokeDasharray = L; el.style.strokeDashoffset = L;
+    el.animate([{ strokeDashoffset: L }, { strokeDashoffset: 0 }], { duration: Math.min(900, 250 + L * 1.2), fill: "forwards", easing: "ease-in-out" });
+  } else if (el.tagName === "foreignObject") vWrite(el.firstChild);
+  else el.animate([{ clipPath: "inset(-20% 100% -20% 0)", opacity: .3 }, { clipPath: "inset(-20% 0 -20% 0)", opacity: 1 }], { duration: 700, fill: "forwards", easing: "ease-out" });
+}
+// "Writing": the maths appears from left to right behind a moving pen.
+function vWrite(el) {
+  if (!el || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const w = el.getBoundingClientRect().width || 200, ms = Math.max(450, Math.min(1600, w * 5));
+  el.animate([{ clipPath: "inset(-40% 100% -40% -4%)" }, { clipPath: "inset(-40% -4% -40% -4%)" }], { duration: ms, easing: "linear", fill: "forwards" });
+  const pen = document.createElement("span"); pen.className = "pen"; pen.textContent = "\u270E"; el.appendChild(pen);
+  pen.animate([{ left: "0%", opacity: 1 }, { left: "100%", opacity: 1, offset: .95 }, { left: "100%", opacity: 0 }], { duration: ms, easing: "linear", fill: "forwards" }).onfinish = () => pen.remove();
+}
+function vKatex(tex, el, display) {
+  try { window.katex ? katex.render(tex, el, { throwOnError: false, displayMode: display, trust: false }) : (el.textContent = tex); } catch { el.textContent = tex; }
+}
+function vInkSize() { if (vScript) $("vid-ink").setAttribute("viewBox", `0 0 ${vScript.size[0]} ${vH()}`); }
+// Scripts use rows of the full image; with hidden bands (buildCut) every row is moved up by the bands above it.
+// While a video plays, a hidden band that holds the video's pen notes (working written in the answer space) is shortened
+// so the notes stay visible: the band then starts 30 px below the lowest note in it.
+function vVideoCuts() {
+  const im = $("q-img"), base = im && (window.IB_QCUT || {})[im._rel]; if (!base || !vScript) return base;
+  const c = base.map((r) => r.slice());
+  for (const sc of vScript.scenes) for (const s of sc.sentences) for (const it of s.ink || []) {
+    const [y0, y1] = vInkY(it); for (const r of c) if (y0 < r[1] && y1 > r[0]) r[0] = Math.max(r[0], Math.min(r[1], y1 + 30));
+  }
+  return c.filter(([a, b]) => b - a > 10);
+}
+function vCuts() { const im = $("q-img"); return im && im._cuts && vScript && im.naturalHeight === vScript.size[1] ? im._cuts : null; }
+function vY(y) { const c = vCuts(); return c ? qMapY(c, y) : y; }
+function vH() { const c = vCuts(); return c ? $("q-img")._h2 : vScript.size[1]; }
+function vMapIt(it) {
+  if (!vCuts()) return it; const m = { ...it };
+  if (it.p) m.p = it.p.map((v, i) => (i % 2 ? vY(v) : v));
+  if (it.y !== undefined) m.y = vY(it.y);
+  if (it.y1 !== undefined) { m.y1 = vY(it.y1); m.y2 = vY(it.y2); }
+  if (it.box) { const [x, y, w, h] = it.box; m.box = [x, vY(y), w, vY(y + h) - vY(y)]; }
+  return m;
+}
+function vFit() { // a part with a lot of working: grow the board (up to a limit) so it still fits in two columns
+  const bd = $("vid-board"); if (getComputedStyle(bd).columnCount === "auto") return;
+  let h = bd.clientHeight;
+  while (bd.scrollWidth > bd.clientWidth + 2 && h < 760) { h += 40; bd.style.height = h + "px"; }
+}
+function vReveal(el) { // keep the newest line in view inside the board only (never scrolls the page)
+  vFit();
+  const bd = $("vid-board"), b = bd.getBoundingClientRect(), r = el.getBoundingClientRect();
+  if (r.right > b.right - 4) bd.scrollLeft += r.right - b.right + 12;
+  if (getComputedStyle(bd).overflowY !== "hidden" && r.bottom > b.bottom - 4) bd.scrollTop += r.bottom - b.bottom + 12;
+}
+// GDC screen on the board (Paper 2 only): a graph (curves, asymptotes, shading, marked points) and/or command lines with results.
+function vFn(s) { try { return new Function("x", "with (Math) { return (" + s + "); }"); } catch { return () => NaN; } }
+function vGdc(g) {
+  const d = document.createElement("div"); d.className = "ln " + (g.sketch ? "sketch" : "gdc");
+  d.innerHTML = g.sketch ? `<div class="sk-top">${esc(g.title || "Sketch")}</div>` : `<div class="gdc-top"><span>GDC</span><span>${esc(g.title || "")}</span></div>`;
+  const scr = document.createElement("div"); scr.className = "gdc-scr"; d.appendChild(scr);
+  if (g.plot) scr.appendChild(vPlot(g));
+  for (const [inp, out] of g.lines || []) {
+    const row = document.createElement("div"); row.className = "gdc-row";
+    const a = document.createElement("span"); vKatex(inp, a, false); row.appendChild(a);
+    if (out !== undefined) { const b = document.createElement("span"); b.className = "out"; vKatex(out, b, false); row.appendChild(b); }
+    scr.appendChild(row);
+  }
+  return d;
+}
+function vPlot(g) {
+  const W = 230, H = 140, [x0, x1] = g.x, [y0, y1] = g.y, mk = (n, a) => { const e = document.createElementNS(SVGNS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const X = (x) => ((x - x0) / (x1 - x0)) * W, Y = (y) => H - ((y - y0) / (y1 - y0)) * H;
+  const svg = mk("svg", { viewBox: `0 0 ${W} ${H}`, class: "gdc-plot" });
+  const clip = "gp" + Math.random().toString(36).slice(2, 8);
+  const defs = mk("defs", {}); const cp = mk("clipPath", { id: clip }); cp.appendChild(mk("rect", { x: 0, y: 0, width: W, height: H })); defs.appendChild(cp); svg.appendChild(defs);
+  const G = mk("g", { "clip-path": `url(#${clip})` }); svg.appendChild(G);
+  if (g.shade) { // region between top and bottom from a to b
+    const T = vFn(g.shade.top), B = vFn(g.shade.bot), pts = [], N = 60, { a, b } = g.shade;
+    for (let i = 0; i <= N; i++) { const x = a + ((b - a) * i) / N; pts.push(`${X(x)},${Y(T(x))}`); }
+    for (let i = N; i >= 0; i--) { const x = a + ((b - a) * i) / N; pts.push(`${X(x)},${Y(B(x))}`); }
+    G.appendChild(mk("polygon", { points: pts.join(" "), fill: "rgba(224,49,49,.28)", stroke: "none" }));
+  }
+  if (y0 < 0 && y1 > 0) G.appendChild(mk("line", { x1: 0, x2: W, y1: Y(0), y2: Y(0), class: "ax" }));
+  if (x0 < 0 && x1 > 0) G.appendChild(mk("line", { x1: X(0), x2: X(0), y1: 0, y2: H, class: "ax" }));
+  for (const v of g.vl || []) G.appendChild(mk("line", { x1: X(v), x2: X(v), y1: 0, y2: H, class: "asy" }));
+  for (const c of g.plot) {
+    const F = vFn(c.f), N = 300; let d = "", prev = null;
+    for (let i = 0; i <= N; i++) {
+      const x = x0 + ((x1 - x0) * i) / N, y = F(x), sy = Y(y);
+      const ok = isFinite(y) && sy > -H * 3 && sy < H * 4 && !(prev !== null && Math.abs(sy - prev) > H * 1.2);
+      d += ok ? `${prev === null ? "M" : "L"}${X(x).toFixed(1)},${sy.toFixed(1)} ` : ""; prev = ok ? sy : null;
+    }
+    G.appendChild(mk("path", { d, fill: "none", stroke: c.c || "#1d3a8a", "stroke-width": c.w || 1.8, "stroke-dasharray": c.dash ? "4 3" : "none" }));
+  }
+  for (const p of g.pts || []) {
+    G.appendChild(mk("circle", { cx: X(p.x), cy: Y(p.y), r: 3.2, fill: "#e03131" }));
+    if (p.t) { const tx = mk("text", { x: X(p.x) + (p.dx ?? 5), y: Y(p.y) + (p.dy ?? -5), class: "gl", "text-anchor": p.anchor || "start" }); tx.textContent = p.t; G.appendChild(tx); }
+  }
+  for (const l of g.labels || []) { const tx = mk("text", { x: X(l.x), y: Y(l.y), class: "gl gl2", "text-anchor": l.anchor || "start" }); tx.textContent = l.t; G.appendChild(tx); }
+  return svg;
+}
+function vTex(tex) { const d = document.createElement("div"); d.className = "ln" + (tex.startsWith("\\quad") ? " cont" : ""); vKatex(tex, d, true); return d; } // "\\quad..." = continuation of the line above: keep it in the same column
+// Board items: a maths line, the given facts of a part in one row, a "sol)" label, or a numbered step.
+function vBoardAdd(t, board) {
+  if (typeof t === "string") return board.appendChild(vTex(t));
+  if (t.given) {
+    let row = [...board.querySelectorAll(".given")].pop();
+    if (!row || row.dataset.part !== t.given) {
+      row = document.createElement("div"); row.className = "ln given"; row.dataset.part = t.given;
+      row.innerHTML = `<b class="glabel">${esc(t.given)}</b>`; board.appendChild(row);
+    } else if (!t.find) row.appendChild(Object.assign(document.createElement("span"), { className: "gsep", textContent: "," }));
+    const piece = document.createElement("span"); piece.className = "gpiece" + (t.find ? " find" : ""); vKatex(t.add, piece, false);
+    return row.appendChild(piece);
+  }
+  if (t.gdc) return board.appendChild(vGdc(t.gdc));
+  if (t.grow !== undefined) { // a working that grows step by step (long / synthetic division): replaces the previous growing line
+    const el = vTex(t.grow); el.dataset.grow = "1";
+    const last = [...board.children].reverse().find((e) => e.dataset && e.dataset.grow);
+    if (last && !t.fresh) { last.replaceWith(el); return el; }
+    return board.appendChild(el);
+  }
+  const d = document.createElement("div");
+  if (t.label) { d.className = "ln lbl"; d.textContent = t.label; }
+  else if (t.step) { d.className = "ln step"; d.innerHTML = `<b>Step ${esc(t.step)}</b> `; const s = document.createElement("span"); vKatex(t.tex || "", s, false); d.appendChild(s); }
+  return board.appendChild(d);
+}
+function vApply(sent, board, animate) { // acts of one sentence: board lines + highlight + pen
+  if (sent.clear) { board.innerHTML = ""; board.style.height = ""; }
+  if (sent.inkclear) vInkClear();
+  if (sent.ink) {
+    if (!animate) sent.ink.forEach((it) => vInkDraw(it, false));
+    else sent.ink.forEach((it, k) => vInkT.push(vAfter(() => vInkDraw(it, true), 300 + k * 900)));
+  }
+  if (sent.hl !== undefined) vHl(sent.hl, animate);
+  if ((!sent.hl || sent.hl === "none") && sent.ink && sent.ink.length) { const ys = sent.ink.map(vInkY), m0 = Math.min(...ys.map((r) => r[0])), m1 = Math.max(...ys.map((r) => r[1])); // the new pen marks, together with the highlight if both fit
+    if (vHlNow && !$("vid-hl").hidden) vFocus(Math.min(m0, vHlNow[0]), Math.max(m1, vHlNow[1]), animate, [m0, m1]); else vFocus(m0, m1, animate); }
+  (sent.tex || []).forEach((t, k) => {
+    if (!animate) { vBoardAdd(t, board); return; }
+    vAfter(() => { board.querySelector(".empty")?.remove(); const el = vBoardAdd(t, board); vReveal(el); vWrite(el); }, 250 + k * 1300);
+  });
+}
+function vRender(s, i) { $("vid-note").hidden = true; // rebuild the state just before sentence i of scene s, then show its caption
+  const board = $("vid-board"); board.innerHTML = ""; board.style.height = ""; vHl("none"); vInkClear(); vInkSize();
+  const sc = vScript.scenes;
+  for (let a = 0; a <= s; a++) for (let b = 0; b < (a < s ? sc[a].sentences.length : i); b++) { const t = sc[a].sentences[b]; vApply(t, board); }
+  board.querySelectorAll(".ln").forEach((n) => (n.style.animation = "none"));
+  if (!board.children.length) board.innerHTML = '<div class="empty">Notes will appear here.</div>';
+  vFit(); board.scrollTop = getComputedStyle(board).overflowY === "hidden" ? 0 : board.scrollHeight; board.scrollLeft = board.scrollWidth;
+  vShowCap(sc[s].sentences[i]);
+}
+function vSceneLabel() {
+  const L = vLang(), sc = vScript.scenes[vPos.s];
+  $("vid-scene").textContent = `${vPos.s + 1} / ${vScript.scenes.length} · ${sc.name[L] || sc.name.en}`;
+  $("vid-part").innerHTML = sc.part ? `<b>${esc(sc.part[L] || sc.part.en)}</b>` + (sc.pq ? ` <span>${esc(sc.pq[L] || sc.pq.en)}</span>` : "") : "";
+  $("vid-part").dataset.part = sc.part ? sc.part.en : "";
+  $("vid-chips").querySelectorAll("button").forEach((b) => {
+    const k = vScript.scenes[+b.dataset.s], c = k.chip === true ? k.name : k.chip; b.textContent = c[L] || c.en;
+    b.classList.toggle("on", +b.dataset.s === vPos.s); b.setAttribute("aria-current", +b.dataset.s === vPos.s ? "true" : "false");
+  });
+  const k = vIdx(); if (k >= 0) $("vid-seek").value = k;
+}
+function vSetPlay(on) { vPlaying = on; $("vid-play").innerHTML = on ? "&#10074;&#10074;" : "&#9654;"; $("vid-play").setAttribute("aria-label", on ? "Pause" : "Play"); }
+function vStop() { vCancelAll(); vInkT = []; vFrozen = []; vPaused = false; vSpeech = null; vTok++; vPlaying = false; if (window.speechSynthesis) speechSynthesis.cancel(); if ($("vid-play")) vSetPlay(false); }
+function vSleep(ms, tok) { return new Promise((res) => vAfter(res, ms)).then(() => tok === vTok); }
+// What the voice actually reads: the "say" text if the script has one, otherwise the subtitle with maths symbols spelled out.
+// Trig names are read in full (a browser voice reads "sec" as "second"); f′ is read "f prime".
+const V_SAY = {
+  en: [[/([²³])d([a-z])\b/g, "$1 d $2"], [/([²³⁴])(?=[A-Za-zθπ(])/g, "$1 "], [/(\d)([a-z])(?![a-z])/g, "$1 $2"], [/⁻¹/g, " inverse"], [/ = /g, " equals "], [/ \+ /g, " plus "], [/ < /g, " is less than "], [/ > /g, " is greater than "], [/\bwhere a\b/g, "where ay"], [/\^\(([^)]*)\)/g, " to the power $1,"], [/\^(\w+)/g, " to the $1"], [/\bcosec\b|\bcsc\b/g, "cosecant"], [/\bsec\b/g, "secant"], [/\bcot\b/g, "cotangent"], [/\barctan\b/g, "arc tangent"], [/\barcsin\b/g, "arc sine"], [/\barccos\b/g, "arc cosine"], [/\b([Ss])in(?=\b|[²³⁻(θπ\d])/g, "$1ine "], [/\b([Cc])os(?=\b|[²³⁻(θπ\d])/g, "$1osine "], [/\b([Tt])an(?=\b|[²³⁻(θπ\d])/g, "$1angent "], [/\barc tan\b/g, "arc tangent"], [/\bsines\b/g, "sines"], [/\bln\b/g, "l n"],
+       [/′′|″/g, " double prime"], [/′/g, " prime"], [/([A-Za-z])'(?=\()/g, "$1 prime"], [/√\(/g, "root of ("], [/√/g, "root "], [/²/g, " squared"], [/³/g, " cubed"], [/⁴/g, " to the 4"], [/ⁿ⁻¹/g, " to the n minus 1"], [/ⁿ/g, " to the n"], [/ᵀ/g, " to the T"],
+       [/×/g, " times "], [/÷/g, " divided by "], [/−/g, " minus "], [/≤/g, " at most "], [/≥/g, " at least "], [/≠/g, " is not "], [/→/g, " goes to "], [/∞/g, "infinity"],
+       [/∫/g, " the integral of "], [/θ/g, "theta"], [/π/g, "pi"], [/ω/g, "omega"], [/λ/g, "lambda"], [/μ/g, "mu"], [/σ/g, "sigma"], [/\|([^|]+)\|/g, "the modulus of $1"], [/(\w)\/(\w)/g, "$1 over $2"], [/\s*\/\s*/g, " over "], [/[₀]/g, " nought"]],
+  ko: [[/\^\(([^)]*)\)/g, "의 $1 제곱"], [/\^(\w+)/g, "의 $1 제곱"], [/\bcosec\b|\bcsc\b/g, "코시컨트"], [/\bsec\b/g, "시컨트"], [/\bcot\b/g, "코탄젠트"], [/\barctan\b/g, "아크탄젠트"], [/\barcsin\b/g, "아크사인"], [/\btan\b/g, "탄젠트"], [/\bsin\b/g, "사인"], [/\bcos\b/g, "코사인"], [/\bln\b/g, "로그"],
+       [/′′|″/g, " 이계도함수"], [/′/g, " 프라임"], [/([A-Za-z])'(?=\()/g, "$1 프라임"], [/√/g, "루트 "], [/²/g, " 제곱"], [/³/g, " 세제곱"], [/×/g, " 곱하기 "], [/÷/g, " 나누기 "], [/−/g, " 마이너스 "], [/≤/g, " 이하 "], [/≥/g, " 이상 "], [/≠/g, " 아님 "], [/→/g, " 에서 "],
+       [/∫/g, " 적분 "], [/θ/g, "세타"], [/π/g, "파이"], [/ω/g, "오메가"], [/λ/g, "람다"], [/μ/g, "뮤"], [/σ/g, "시그마"], [/\|([^|]+)\|/g, "절댓값 $1"], [/(\w)\/(\w)/g, "$1 나누기 $2"], [/\s*\/\s*/g, " 나누기 "]],
+};
+const V_LETTER = { b: "bee", c: "see", d: "dee", e: "ee", f: "eff", g: "gee", h: "aitch", j: "jay", k: "kay", l: "el", m: "em", n: "en", o: "oh", p: "pee", q: "cue", r: "ar", s: "ess", t: "tee", u: "you", v: "vee", w: "double you", x: "ex", y: "why", z: "zed" };
+const V_MATHWORD = "over|plus|minus|times|equals|squared|cubed|to the|root|and|by|than|is|of|at|with|into";
+function vSayText(sent, lang) {
+  let t = (sent.say && sent.say[lang]) || sent[lang] || sent.en;
+  for (const [re, by] of V_SAY[lang] || V_SAY.en) t = t.replace(re, by);
+  if (lang !== "ko") {
+    t = t.replace(/(^|[^A-Za-z'’])([b-hj-z])(?![A-Za-z'’])/g, (m, pre, l) => pre + V_LETTER[l]);
+    t = t.replace(/\b([Pp]arts?) a\b/g, "$1 ay").replace(/\b(and) a\b(?= (to|show|find|write|use))/g, "$1 ay");
+    // "a" as a variable (next to a maths word or a number), not the article
+    t = t.replace(new RegExp(`\\b(${V_MATHWORD}|\\d+) a\\b(?= (${V_MATHWORD}|over|[,.]|$))|\\ba\\b(?= (over|plus|minus|times|equals|squared|cubed|to the)\\b)|\\b(over|plus|minus|times|equals|root) a\\b(?! (?!(over|plus|minus|times|equals|squared|cubed|to|and|is)\\b)[a-z]{2,})`, "g"),
+      (m) => m.replace(/\ba$/, "ay").replace(/^a\b/, "ay"));
+  }
+  return t.replace(/\s+/g, " ").trim();
+}
+function vSpeak(sent, tok) { // resolves true when the sentence is finished and still current
+  const lang = vLang(), rate = parseFloat($("vid-rate").value) || 1;
+  const text = vSayText(sent, lang);
+  const est = Math.max(1500, text.length * (lang === "ko" ? 170 : 62)) / rate;
+  const voice = $("vid-voice").checked && window.speechSynthesis ? vVoice(lang) : null;
+  $("vid-note").hidden = !($("vid-voice").checked && !voice);
+  $("vid-note").textContent = $("vid-voice").checked && !voice ? `No ${lang === "ko" ? "Korean" : "English"} voice was found on this device, so only subtitles are shown.` : "";
+  if (!voice) return vSleep(est, tok);
+  // Pause = stop the voice at the current word; resume = speak again from that word (speechSynthesis.pause() is unreliable across voices).
+  return new Promise((res) => {
+    let done = false, from = 0, gen = 0, fb = 0;
+    const fin = (ok) => { if (!done) { done = true; vCancel(fb); if (vSpeech === ctl) vSpeech = null; res(ok); } };
+    const say = (start) => {
+      const my = ++gen, u = new SpeechSynthesisUtterance(text.slice(start)); u.voice = voice; u.lang = voice.lang; u.rate = rate;
+      u.onboundary = (e) => { if (my === gen && e.name !== "sentence") from = start + e.charIndex; };
+      u.onend = () => { if (my === gen) fin(tok === vTok); }; u.onerror = () => { if (my === gen) fin(false); };
+      speechSynthesis.speak(u);
+    };
+    const ctl = { pause() { gen++; speechSynthesis.cancel(); }, resume() { vAfter(() => { if (!done && tok === vTok) say(from); }, 60); } };
+    vSpeech = ctl;
+    fb = vAfter(() => fin(tok === vTok), est * 1.8 + 2000); // some voices never fire onend
+    vAfter(() => { if (tok === vTok) say(0); else fin(false); }, 60);
+  });
+}
+async function vRun() {
+  const tok = ++vTok; vSetPlay(true);
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  const sc = vScript.scenes;
+  for (let s = vPos.s; s < sc.length; s++) {
+    for (let i = s === vPos.s ? vPos.i : 0; i < sc[s].sentences.length; i++) {
+      if (tok !== vTok) return;
+      vPos = { s, i }; vSceneLabel();
+      const sent = sc[s].sentences[i];
+      if (i === 0 && s !== 0 && sent.clear === undefined) { /* keep the board across scenes unless asked to clear */ }
+      vApply(sent, $("vid-board"), true); $("vid-board").querySelector(".empty")?.remove(); vShowCap(sent);
+
+      if (!(await vSpeak(sent, tok))) return;
+      if (sent.wait) {
+        const cap = $("vid-cap");
+        for (let t = sent.wait; t > 0; t--) { cap.textContent = (vSubLang() === "ko" ? "직접 풀어 보세요… " : "Try it yourself… ") + t; if (!(await vSleep(1000, tok))) return; }
+        vShowCap(sent);
+      }
+    }
+  }
+  if (tok === vTok) { vSetPlay(false); vPos = { s: 0, i: 0 }; vRender(0, 0); vSceneLabel(); }
+}
+function vToggle() { if (vPaused) vResume(); else if (vPlaying) vPause(); else vRun(); }
+function vJump(d) {
+  const was = vPlaying; vStop();
+  const n = vScript.scenes.length; vPos = { s: Math.min(n - 1, Math.max(0, vPos.s + d)), i: 0 };
+  vRender(vPos.s, 0); vSceneLabel(); if (was) vRun();
+}
+function vStep(d) { // one sentence back / forward
+  if (!vFlat.length) return;
+  const k = Math.min(vFlat.length - 1, Math.max(0, vIdx() + d)), p = vFlat[k]; vSeekTo(p.s, p.i);
+}
+let vLastSub = "same";
+function vCcUI() { const on = $("vid-sub").value !== "off"; $("vid-cc").setAttribute("aria-pressed", String(on)); $("vid-cc").classList.toggle("off", !on); }
+function vCc() {
+  const s = $("vid-sub");
+  if (s.value === "off") s.value = vLastSub || "same"; else { vLastSub = s.value; s.value = "off"; }
+  s.onchange();
+}
+function vKeys(e) { // while the video is open: Space, arrows and C control the video, not the question list
+  if ($("vid-panel").hidden || $("practice").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target, tag = t && t.tagName;
+  if ((tag === "INPUT" && t.type !== "range" && t.type !== "checkbox") || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
+  const k = e.key;
+  if (k === " " || k === "Spacebar") vToggle();
+  else if (k === "ArrowRight") vStep(1);
+  else if (k === "ArrowLeft") vStep(-1);
+  else if (k === "c" || k === "C") vCc();
+  else return;
+  e.preventDefault(); e.stopPropagation();
+}
+function initVideoUI() {
+  const p = vPref();
+  if (p.lang) $("vid-lang").value = p.lang; else $("vid-lang").value = (navigator.language || "").startsWith("ko") ? "ko" : "en";
+  if (p.sub) $("vid-sub").value = p.sub; vCcUI(); if (p.rate) $("vid-rate").value = p.rate; if (p.voice === false) $("vid-voice").checked = false;
+  vInitVoices(); if (window.speechSynthesis) speechSynthesis.onvoiceschanged = vInitVoices;
+  $("toggle-vid").onclick = toggleVideo; $("vid-play").onclick = () => { vToggle(); $("vid-play").blur(); };
+  $("vid-prev").onclick = () => vJump(-1); $("vid-next").onclick = () => vJump(1);
+  $("vid-cc").onclick = () => { vCc(); $("vid-cc").blur(); };
+  window.addEventListener("keydown", vKeys, true);
+  $("vid-seek").oninput = () => { const p = vFlat[+$("vid-seek").value]; if (p) vSeekTo(p.s, p.i); };
+  for (const id of ["vid-lang", "vid-sub", "vid-rate", "vid-voice"]) $(id).onchange = () => {
+    vSave(); vCcUI(); if (!vScript || $("vid-panel").hidden) return;
+    const was = vPlaying; vStop(); vRender(vPos.s, vPos.i); vSceneLabel(); if (was) vRun();
+  };
 }
 
 // ---------------- tag editor ----------------
@@ -524,6 +983,7 @@ function setupPractice() {
   $("mark").onclick = $("mark2").onclick = toggleMark;
   $("toggle-ms").onclick = () => showMs($("ms-img").hidden);
   $("toggle-sol").onclick = toggleSolution;
+  initVideoUI();
   document.addEventListener("keydown", (e) => {
     if ($("practice").hidden || typing(e) || !$("settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "ArrowRight") step(1);
