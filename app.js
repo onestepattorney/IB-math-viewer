@@ -412,6 +412,10 @@ function vInitVoices() { if (window.speechSynthesis) vVoices = speechSynthesis.g
 // for the list again, and the first sentence waits up to 1 s for it; with still no list only subtitles are shown.
 const vBadVoices = new Set(); // voices that failed on this device (Android: a network voice may fail): skipped from then on
 let vSpeechUnlocked = false, vVoicesWaited = false; // vVoicesWaited: waited once (up to 1 s) for the list
+// Some phone browsers (Android) never list their voices but still speak with the system voice when only the language is
+// set: then a "default voice" (no u.voice) is tried; if it does not start within 3 s or fails, only subtitles are shown.
+const vDefaultBad = {};
+function vDefaultVoice(lang) { return vDefaultBad[lang] ? null : { def: true, name: "", lang: lang === "ko" ? "ko-KR" : "en-US" }; }
 function vUnlockSpeech() {
   if (vSpeechUnlocked || !window.speechSynthesis) return;
   try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); vSpeechUnlocked = true; } catch {}
@@ -702,31 +706,40 @@ function vSpeak(sent, tok) { // resolves true when the sentence is finished and 
     vVoicesWaited = true;
     return (async () => { for (let k = 0; k < 10 && !vVoices.length; k++) { if (!(await vSleep(100, tok))) return false; vInitVoices(); } return vSpeak(sent, tok); })();
   }
+  if (!voice && $("vid-voice").checked && window.speechSynthesis) voice = vDefaultVoice(lang);
   $("vid-note").hidden = !($("vid-voice").checked && !voice);
   $("vid-note").textContent = $("vid-voice").checked && !voice ? `No ${lang === "ko" ? "Korean" : "English"} voice was found on this device, so only subtitles are shown.` : "";
   if (!voice) return vSleep(est, tok);
   // Pause = stop the voice at the current word; resume = speak again from that word (speechSynthesis.pause() is unreliable across voices).
   return new Promise((res) => {
-    let done = false, from = 0, gen = 0, fb = 0;
-    const fin = (ok) => { if (!done) { done = true; vCancel(fb); if (vSpeech === ctl) vSpeech = null; res(ok); } };
+    let done = false, from = 0, gen = 0, fb = 0, started = false, sw = 0;
+    const fin = (ok) => { if (!done) { done = true; vCancel(fb); vCancel(sw); if (vSpeech === ctl) vSpeech = null; res(ok); } };
+    const noVoice = () => { // no voice works: subtitles only, timed like speech
+      gen++; speechSynthesis.cancel();
+      $("vid-note").hidden = false; $("vid-note").textContent = `No working ${lang === "ko" ? "Korean" : "English"} voice on this device, so only subtitles are shown.`;
+      vCancel(fb); fb = vAfter(() => fin(tok === vTok), est);
+    };
     const say = (start) => {
-      const my = ++gen, u = new SpeechSynthesisUtterance(text.slice(start)); u.voice = voice; u.lang = voice.lang; u.rate = rate;
+      if (!voice) return; // no voice left: the subtitles timer finishes the sentence
+      const my = ++gen, u = new SpeechSynthesisUtterance(text.slice(start)); if (!voice.def) u.voice = voice; u.lang = voice.lang; u.rate = rate;
+      u.onstart = () => { started = true; vCancel(sw); };
       u.onboundary = (e) => { if (my === gen && e.name !== "sentence") from = start + e.charIndex; };
       u.onend = () => { if (my === gen) fin(tok === vTok); };
       u.onerror = (e) => {
         if (my !== gen) return;
         if (e.error === "interrupted" || e.error === "canceled") { fin(false); return; } // stopped by pause or a jump
-        vBadVoices.add(voice.name); voice = vVoice(lang); // the voice failed: try the next one, else subtitles only
+        if (voice.def) vDefaultBad[lang] = true; else vBadVoices.add(voice.name); // the voice failed: try the next one, else subtitles only
+        voice = vVoice(lang) || vDefaultVoice(lang);
         if (voice) { vAfter(() => { if (!done && tok === vTok) say(from); }, 60); return; }
-        $("vid-note").hidden = false; $("vid-note").textContent = `No working ${lang === "ko" ? "Korean" : "English"} voice on this device, so only subtitles are shown.`;
-        vCancel(fb); fb = vAfter(() => fin(tok === vTok), est);
+        noVoice();
       };
       speechSynthesis.speak(u);
     };
-    const ctl = { pause() { gen++; speechSynthesis.cancel(); }, resume() { vAfter(() => { if (!done && tok === vTok) say(from); }, 60); } };
+    const ctl = { pause() { gen++; vCancel(sw); speechSynthesis.cancel(); }, resume() { vAfter(() => { if (!done && tok === vTok) say(from); }, 60); } };
     vSpeech = ctl;
     fb = vAfter(() => fin(tok === vTok), est * 1.8 + 2000); // some voices never fire onend
     vAfter(() => { if (tok === vTok) say(0); else fin(false); }, 60);
+    if (voice.def) sw = vAfter(() => { if (!started && !done && tok === vTok) { vDefaultBad[lang] = true; noVoice(); } }, 3000); // silent: never started
   });
 }
 async function vRun() {
