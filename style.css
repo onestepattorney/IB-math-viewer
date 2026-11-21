@@ -303,3 +303,20 @@ img.failed{cursor:pointer;color:#b91c1c}
   .t-table td.act{grid-column:1 / -1;text-align:left;margin-top:6px}
   .t-table td.act button{margin:0 6px 0 0}
 }
+
+/* ---- self-rating (sign-in mode) ---- */
+#rate{margin:14px 0 4px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.rate-row,.rate-causes{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rate-q{font-weight:600;margin-right:4px}
+#rate button.on[data-r="got"]{background:var(--ok);border-color:var(--ok);color:#fff}
+#rate button.on[data-r="partly"]{background:var(--warn);border-color:var(--warn);color:#111}
+#rate button.on[data-r="missed"]{background:#dc2626;border-color:#dc2626;color:#fff}
+#rate-more{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+#rate-more[hidden]{display:none}
+.rate-causes button{font-size:13px;padding:4px 10px}
+.rate-causes button.on{border-color:var(--acc);color:var(--acc);font-weight:600}
+#rate-note{width:100%}
+.rdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.rdot.got{background:var(--ok)}.rdot.partly{background:var(--warn)}.rdot.missed{background:#dc2626}
+.t-num{font-variant-numeric:tabular-nums}
+@media (max-width:700px){ .t-table td.num{font-size:13px} .t-table td.num::before{content:attr(data-l) " ";color:var(--mute)} }

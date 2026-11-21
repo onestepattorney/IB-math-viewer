@@ -241,7 +241,7 @@ document.addEventListener("pointerdown", (e) => { // tap outside the open list b
 for (const ev of ["scroll", "resize"]) window.addEventListener(ev, () => document.querySelectorAll(".split.list-open").forEach(placePanel), { passive: true });
 
 // ---------------- practice: filters ----------------
-const FILTER_IDS = ["f-subject", "f-level", "f-topic", "f-subtopic", "f-paper", "f-diff", "f-year", "f-month", "f-tz"];
+const FILTER_IDS = ["f-subject", "f-level", "f-topic", "f-subtopic", "f-paper", "f-diff", "f-year", "f-month", "f-tz", "f-status"];
 
 function refreshTopicFilters() {
   // Topic ids/names are shared by AA and AI; subtopics depend on the course.
@@ -257,20 +257,20 @@ function refreshSubtopics() {
 
 // The controls only edit a draft. The list is built from `applied`, which changes only when "Show questions" is pressed,
 // so the list on screen always matches the filters it says it was built from.
-const EMPTY_F = { level: "", subject: "", paper: "", topic: "", sub: "", diff: 0, year: "", month: "", tz: "", qnum: "", marked: false };
+const EMPTY_F = { level: "", subject: "", paper: "", topic: "", sub: "", diff: 0, year: "", month: "", tz: "", qnum: "", marked: false, status: "" };
 let applied = null, appliedText = "";  // null until the first "Show questions"
 const readDraft = () => ({
   level: $("f-level").value, subject: $("f-subject").value, paper: $("f-paper").value,
   topic: $("f-topic").value, sub: $("f-subtopic").value, diff: +$("f-diff").value,
   year: $("f-year").value, month: $("f-month").value, tz: $("f-tz").value, qnum: $("f-qnum").value,
-  marked: $("f-marked").checked,
+  marked: $("f-marked").checked, status: $("f-status").value,
 });
 const matcher = (f) => (q) =>
   (!f.level || q.level === f.level) && (!f.subject || q.subject === f.subject) &&
   (!f.paper || String(q.paper) === f.paper) && (!f.year || String(q.year) === f.year) &&
   (!f.month || q.month === f.month) && (!f.tz || q.tz === f.tz) && (!f.qnum || String(q.q) === f.qnum) &&
   (!f.topic || q.topic === f.topic) && (!f.sub || q.subtopic_name === f.sub) &&
-  (!f.diff || tier(q.difficulty) === f.diff) && (!f.marked || isMarked(q));
+  (!f.diff || tier(q.difficulty) === f.diff) && (!f.marked || isMarked(q)) && (!f.status || statusIs(q, f.status));
 const filtered = () => (applied ? questions.filter(matcher(applied)) : []);
 function draftText() {
   const parts = FILTER_IDS.filter((id) => $(id).value).map((id) => $(id).selectedOptions[0].text);
@@ -318,7 +318,7 @@ function renderList(reset) {
   setPosition($("pos-bar"), $("list-label"), idx, n, applied ? `List (${n})` : "List");
   const rows = shown.slice(0, listLimit).map((q, i) =>
     `<li data-i="${i}" class="${current && current.id === q.id ? "sel" : ""}"><span class="r">${isMarked(q) ? '<span class="flag">⚑</span>' : ""}${q.marks}m</span>` +
-    `${label(q)}<br><small>${esc(q.title || "(untagged)")}${q.difficulty ? " · " + TIER_NAMES[tier(q.difficulty)] : ""}</small></li>`);
+    `${rdot(q)}${label(q)}<br><small>${esc(q.title || "(untagged)")}${q.difficulty ? " · " + TIER_NAMES[tier(q.difficulty)] : ""}</small></li>`);
   if (n > listLimit) rows.push(`<li class="more" data-more>Show ${Math.min(PAGE, n - listLimit)} more (${n - listLimit} left)</li>`);
   $("list").innerHTML = rows.join("") || `<li class="muted">${applied ? "No questions match these filters." : "Choose filters above, then press “Show”."}</li>`;
   if (!current) $("empty").textContent = !applied ? "Choose filters above, then press “Show” to get a list of questions." : n ? `${n} question${n === 1 ? "" : "s"} found — pick one from the list.` : "No questions match these filters — loosen a filter and press “Show” again.";
@@ -334,7 +334,7 @@ function openQuestion(q) {
   $("meta").innerHTML = `<b>${label(q)}</b> <span>${q.marks} marks${q.section ? " · Section " + esc(q.section) : ""}</span>` +
     (q.topic_name ? ` <span>${esc(q.topic_name)} › ${esc(q.subtopic_name)}</span> ${tierPill(q)}` : "") +
     (q.edited ? ' <span class="badge edited">edited</span>' : "");
-  setupSolution(q); setupVideo(q);
+  setupSolution(q); setupVideo(q); setupRate(q);
   $("now").innerHTML = `<b>${label(q)}</b> · ${esc(q.subtopic_name || "")}${q.difficulty ? " · " + TIER_NAMES[tier(q.difficulty)] : ""}`;
   updateMarkUI();
   renderList();
@@ -354,6 +354,84 @@ function step(d) {
   openQuestion(shown[i < 0 ? (d > 0 ? 0 : shown.length - 1) : (i + d + shown.length) % shown.length]);
 }
 
+// ---- study record (sign-in mode): self-rating, review dates, review-later marks; one row per question in question_state ----
+let qstate = {};  // qid -> { rating, cause, note, later, stage, due }
+const RATING_NAMES = { got: "Got it", partly: "Partly", missed: "Missed" };
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; // the device's own date
+const today = () => ymd(new Date());
+const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return ymd(d); };
+const isDue = (st) => !!(st && st.rating && st.due && st.due <= today());
+function statusIs(q, s) {
+  const st = qstate[q.id];
+  if (s === "new") return !st || !st.rating;
+  if (s === "due") return isDue(st);
+  return !!(st && st.rating === s);
+}
+const rdot = (q) => { const st = qstate[q.id]; return st && st.rating ? `<span class="rdot ${st.rating}" title="${RATING_NAMES[st.rating]}"></span>` : ""; };
+// Spaced review: Missed -> again tomorrow; Partly -> in 3 days; Got it -> 7, 21, 60 days as it keeps being right.
+function schedule(prev, r) {
+  if (r === "missed") return { stage: 0, due: addDays(1) };
+  if (r === "partly") return { stage: 0, due: addDays(3) };
+  const stage = prev && prev.rating ? Math.min((prev.stage || 0) + 1, 3) : 2;
+  return { stage, due: addDays([3, 7, 21, 60][stage]) };
+}
+async function loadState() {
+  if (!SB || !me.id) return;
+  const r = await SB.from("question_state").select("qid,rating,cause,note,later,stage,due");
+  if (r.error) return;
+  qstate = {}; for (const x of r.data || []) qstate[x.qid] = x;
+  // review-later marks: the server is the record; marks made in this browser before sign-in mode are sent up once
+  const up = Object.keys(flags).filter((id) => !(qstate[id] && qstate[id].later));
+  for (const id of up) saveState(id, { later: true });
+  for (const [id, x] of Object.entries(qstate)) if (x.later && !flags[id]) flags[id] = Date.now();
+  for (const id of Object.keys(flags)) if (qstate[id] && qstate[id].later === false && !up.includes(id)) delete flags[id];
+  lsSet(FKEY, flags);
+}
+async function saveState(qid, patch) {
+  const row = { ...(qstate[qid] || {}), ...patch, qid };
+  qstate[qid] = row;
+  if (!SB || !me.id) return { error: null };
+  const r = await SB.from("question_state").upsert({ user_id: me.id, qid, rating: row.rating || null, cause: row.cause || null, note: row.note || null,
+    later: !!row.later, stage: row.stage || 0, due: row.due || null, updated_at: new Date().toISOString() }, { onConflict: "user_id,qid" });
+  return r;
+}
+function rateText(st) {
+  if (!st || !st.rating) return "";
+  const d = st.due ? new Date(st.due + "T00:00:00") : null;
+  if (isDue(st)) return `${RATING_NAMES[st.rating]} · review due now`;
+  return `${RATING_NAMES[st.rating]} · next review ${d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}`;
+}
+function setupRate(q) {
+  const show = SBMODE && !!me.id; $("rate").hidden = !show; if (!show) return;
+  const st = qstate[q.id] || {};
+  $("rate").querySelectorAll("button[data-r]").forEach((b) => b.classList.toggle("on", b.dataset.r === st.rating));
+  $("rate").querySelectorAll("button[data-c]").forEach((b) => b.classList.toggle("on", b.dataset.c === st.cause));
+  $("rate-more").hidden = !(st.rating === "missed" || st.rating === "partly");
+  $("rate-note").value = st.note || "";
+  $("rate-state").textContent = rateText(st);
+}
+function initRateUI() {
+  if (!SBMODE) return;
+  $("f-status-wrap").hidden = false;
+  $("rate").addEventListener("click", async (e) => {
+    if (!current) return;
+    const q = current, rb = e.target.closest("button[data-r]"), cb = e.target.closest("button[data-c]");
+    if (rb) {
+      const r = rb.dataset.r, prev = qstate[q.id] || {};
+      const res = await saveState(q.id, { rating: r, ...schedule(prev, r), cause: r === "got" ? null : prev.cause });
+      if (!res.error) SB.from("attempts").insert({ user_id: me.id, qid: q.id, rating: r }).then(() => {}, () => {});
+      if (current === q) { setupRate(q); if (res.error) $("rate-state").textContent = "Couldn't save: " + res.error.message; }
+      renderList(); return;
+    }
+    if (cb) {
+      const st = qstate[q.id] || {}, c = st.cause === cb.dataset.c ? null : cb.dataset.c;
+      await saveState(q.id, { cause: c });
+      if (current === q) setupRate(q);
+    }
+  });
+  $("rate-note").addEventListener("change", () => { if (current) saveState(current.id, { note: $("rate-note").value.trim() }); });
+}
+
 // ---- review-later marks ----
 function updateMarkUI() {
   const on = !!(current && isMarked(current));
@@ -366,6 +444,7 @@ function toggleMark() {
   if (!current) return;
   if (flags[current.id]) delete flags[current.id]; else flags[current.id] = Date.now();
   lsSet(FKEY, flags); updateMarkUI(); renderList();
+  if (SBMODE) saveState(current.id, { later: !!flags[current.id] });
 }
 
 // ---- own solution PDF (data/solutions/*.pdf), opened at the page where the question starts ----
@@ -1050,11 +1129,17 @@ const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year
 function tMsg(text, kind) { const m = $("t-msg"); m.textContent = text || ""; m.className = "t-msg" + (kind ? " " + kind : ""); }
 async function renderTeacher() {
   if (!SB || !me.teacher) return;
-  const [mem, prof, sol] = await Promise.all([
+  const week = new Date(Date.now() - 7 * 864e5).toISOString();
+  const [mem, prof, sol, qs, at] = await Promise.all([
     SB.from("members").select("email,name,active,added_at").order("added_at", { ascending: true }),
-    SB.from("profiles").select("email,name,created_at,last_seen"),
+    SB.from("profiles").select("user_id,email,name,created_at,last_seen"),
     SB.rpc("solutions_open"),
+    SB.from("question_state").select("user_id,rating"),
+    SB.from("attempts").select("user_id,at").gte("at", week),
   ]);
+  const num = {}; const bump = (u, k) => { (num[u] = num[u] || { tried: 0, missed: 0, week: 0 })[k]++; };
+  for (const x of qs.data || []) if (x.rating) { bump(x.user_id, "tried"); if (x.rating === "missed") bump(x.user_id, "missed"); }
+  for (const x of at.data || []) bump(x.user_id, "week");
   if (mem.error) { tMsg("Couldn't load the student list: " + mem.error.message, "err"); return; }
   const byEmail = new Map((prof.data || []).map((p) => [p.email, p]));
   const rows = mem.data || [];
@@ -1063,6 +1148,7 @@ async function renderTeacher() {
     const p = byEmail.get(m.email) || {}, name = m.name || p.name || "";
     return `<tr data-email="${esc(m.email)}"><td class="who">${name ? `<b>${esc(name)}</b>` : ""}<span>${esc(m.email)}</span></td>` +
       `<td><span class="t-st ${m.active ? "on" : "off"}">${m.active ? "Active" : "Paused"}</span></td>` +
+      ((n) => `<td class="num t-num" data-l="Tried">${n.tried}</td><td class="num t-num" data-l="Missed">${n.missed}</td><td class="num t-num" data-l="This week">${n.week}</td>`)(num[p.user_id] || { tried: 0, missed: 0, week: 0 }) +
       `<td class="dt">${p.created_at ? "First sign-in " + fmtDay(p.created_at) : "Not signed in yet"}</td>` +
       `<td class="dt">${p.last_seen ? "Last seen " + fmtDay(p.last_seen) : ""}</td>` +
       `<td class="act"><button data-act="${m.active ? "pause" : "resume"}">${m.active ? "Pause" : "Resume"}</button><button data-act="remove">Remove</button></td></tr>`;
@@ -1108,6 +1194,8 @@ function renderBrowse() {
   const markedN = Object.keys(flags).length;
   $("b-summary").textContent = `${pool.length} questions — tap a subtopic to practise it.`;
   const mb = $("b-marked"); mb.hidden = !markedN; mb.innerHTML = `&#9873; Review marked (${markedN})`;
+  const dueN = SBMODE ? questions.filter((q) => isDue(qstate[q.id])).length : 0;
+  $("b-due").hidden = !dueN; $("b-due").textContent = `Review today (${dueN})`;
   $("b-cards").innerHTML = topics[subject].map((t) => {
     const tq = pool.filter((q) => q.topic === t.id);
     const rows = t.subtopics.filter((s) => level === "HL" || !s.hl_only).map((s) => {
@@ -1120,8 +1208,9 @@ function renderBrowse() {
     return `<div class="card"><h3 data-topic="${t.id}">${t.id}. ${esc(t.name)}<small>${tq.length} questions</small></h3>${rows}</div>`;
   }).join("");
 }
-function goPractice({ level, subject, topic, sub, marked }) {
+function goPractice({ level, subject, topic, sub, marked, status }) {
   for (const id of FILTER_IDS) $(id).value = "";
+  $("f-status").value = status || "";
   $("f-qnum").value = ""; $("f-marked").checked = !!marked;
   $("f-level").value = level || ""; $("f-subject").value = subject || "";
   refreshTopicFilters(); $("f-topic").value = topic || ""; refreshSubtopics();
@@ -1137,6 +1226,7 @@ function setupBrowse() {
     else if (head) goPractice({ level, subject, topic: head.dataset.topic });
   });
   $("b-marked").onclick = () => goPractice({ marked: true });
+  $("b-due").onclick = () => goPractice({ status: "due" });
 }
 function setupPractice() {
   const fbOpen = () => setFiltersOpen(!$("filterbar").classList.contains("open"));
@@ -1161,7 +1251,7 @@ function setupPractice() {
   $("mark").onclick = $("mark2").onclick = toggleMark;
   $("toggle-ms").onclick = () => showMs($("ms-img").hidden);
   $("toggle-sol").onclick = toggleSolution;
-  initVideoUI();
+  initVideoUI(); initRateUI();
   document.addEventListener("keydown", (e) => {
     if ($("practice").hidden || typing(e) || !$("settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "ArrowRight") step(1);
@@ -1187,7 +1277,7 @@ async function init() {
     return;
   }
   await connectCard();
-  await loadRemoteExtras();
+  await Promise.all([loadRemoteExtras(), loadState()]);
   const aside = retireStale();
   questions.forEach(applyOverride);
   const years = [...new Set(questions.map((q) => q.year))].sort().map((y) => [String(y), String(y)]);

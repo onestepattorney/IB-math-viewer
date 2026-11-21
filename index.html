@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css?v=202611211423">
+<link rel="stylesheet" href="style.css?v=202611211440">
 </head>
 <body>
 <div id="boot-msg" style="padding:14px 20px;background:#fef3c7;color:#78350f;font:14px system-ui,sans-serif">Loading&hellip; If this yellow message stays, the files next to this page are missing (style.css, app.js, data/). Extract or clone the <b>whole</b> repository folder &mdash; do not copy index.html on its own &mdash; and open <code>app/index.html</code> from inside it.</div>
@@ -91,6 +91,7 @@
   </div>
   <div class="b-sum">
     <p id="b-summary" class="muted"></p>
+    <button id="b-due" class="primary" hidden></button>
     <button id="b-marked" hidden></button>
   </div>
   <div id="b-cards"></div>
@@ -120,6 +121,8 @@
         <select id="f-year"><option value="">All</option></select></label>
       <label>Month
         <select id="f-month"><option value="">All</option><option>May</option><option>November</option></select></label>
+      <label id="f-status-wrap" hidden>My status
+        <select id="f-status"><option value="">All</option><option value="due">Due for review</option><option value="new">Not tried yet</option><option value="missed">Missed</option><option value="partly">Partly</option><option value="got">Got it</option></select></label>
       <label class="chk"><input id="f-marked" type="checkbox"> &#9873; Review-later only</label>
       <button id="more-toggle" aria-expanded="false">More &#9662;</button>
       <div id="more-filters" hidden>
@@ -188,6 +191,19 @@
             </div>
           </div>
         </div>
+        <div id="rate" hidden>
+          <div class="rate-row">
+            <span class="rate-q">How did it go?</span>
+            <button data-r="got">Got it</button><button data-r="partly">Partly</button><button data-r="missed">Missed</button>
+            <span id="rate-state" class="muted" aria-live="polite"></span>
+          </div>
+          <div id="rate-more" hidden>
+            <div class="rate-causes"><span class="muted">What went wrong?</span>
+              <button data-c="concept">Didn't know the method</button><button data-c="careless">Careless slip</button><button data-c="misread">Misread the question</button><button data-c="time">Ran out of time</button><button data-c="calculator">Calculator</button>
+            </div>
+            <input id="rate-note" type="text" maxlength="300" placeholder="Note for next time (optional)">
+          </div>
+        </div>
         <div class="actions bottom-nav">
           <button id="prev2">&lsaquo; Prev</button>
           <span class="grow"></span>
@@ -211,7 +227,7 @@
     </form>
     <p id="t-msg" class="t-msg" aria-live="polite"></p>
     <div class="t-table-wrap"><table class="t-table">
-      <thead><tr><th>Student</th><th>Status</th><th>First sign-in</th><th>Last seen</th><th></th></tr></thead>
+      <thead><tr><th>Student</th><th>Status</th><th>Tried</th><th>Missed</th><th>This week</th><th>First sign-in</th><th>Last seen</th><th></th></tr></thead>
       <tbody id="t-rows"></tbody>
     </table></div>
     <p id="t-empty" class="muted" hidden>No students yet. Add the first one above.</p>
@@ -274,10 +290,10 @@
   </section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" crossorigin="anonymous"></script>
-<script src="data/config.js?v=202611211423"></script>
+<script src="data/config.js?v=202611211440"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-<script src="data/data.js?v=202611211423"></script>
-<script src="app.js?v=202611211423"></script>
+<script src="data/data.js?v=202611211440"></script>
+<script src="app.js?v=202611211440"></script>
 </body>
 </html>
