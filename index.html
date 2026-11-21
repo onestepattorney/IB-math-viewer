@@ -4,12 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css?v=202611112014">
+<link rel="stylesheet" href="style.css?v=202611211404">
 </head>
 <body>
 <div id="boot-msg" style="padding:14px 20px;background:#fef3c7;color:#78350f;font:14px system-ui,sans-serif">Loading&hellip; If this yellow message stays, the files next to this page are missing (style.css, app.js, data/). Extract or clone the <b>whole</b> repository folder &mdash; do not copy index.html on its own &mdash; and open <code>app/index.html</code> from inside it.</div>
 <div id="connect" hidden>
-  <div class="card">
+  <div class="card" id="c-signin" hidden>
+    <h2>Sign in</h2>
+    <p>IB Math Practice is for invited students. Sign in with the Google account your teacher added.</p>
+    <button id="c-google" class="google primary">Sign in with Google</button>
+    <button id="c-out" hidden>Sign out</button>
+    <p class="muted small"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
+  </div>
+  <div class="card" id="c-github">
     <h2>Connect to your private repository</h2>
     <p>The question images stay in your private GitHub repository. This page fetches them only when you open a question, using a read-only token that is stored in this browser only.</p>
     <ol>
@@ -20,8 +27,8 @@
     </ol>
     <input id="c-token" type="password" placeholder="github_pat_..." autocomplete="off">
     <button id="c-test">Test connection</button>
-    <p id="c-msg" aria-live="polite"></p>
   </div>
+  <p id="c-msg" aria-live="polite"></p>
 </div>
 
 <div id="settings" class="overlay" hidden>
@@ -49,6 +56,7 @@
     <p id="version" class="muted" hidden></p>
     <div id="conn-box" hidden>
       <h3>Connection</h3>
+      <p id="conn-who" class="muted" hidden></p>
       <div class="row">
         <button id="disconnect">Disconnect (forget token)</button>
         <button id="clear-cache">Clear cached images</button>
@@ -239,10 +247,11 @@
     </div>
   </section>
 </main>
-<script src="data/config.js?v=202611112014"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" crossorigin="anonymous"></script>
+<script src="data/config.js?v=202611211404"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-<script src="data/data.js?v=202611112014"></script>
-<script src="app.js?v=202611112014"></script>
+<script src="data/data.js?v=202611211404"></script>
+<script src="app.js?v=202611211404"></script>
 </body>
 </html>

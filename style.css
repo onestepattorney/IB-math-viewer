@@ -135,6 +135,12 @@ nav button.active{border-color:var(--acc);color:var(--acc);font-weight:600}
 #connect[hidden]{display:none}
 #connect .card{background:#fff;color:#111;max-width:560px;width:100%;padding:20px;border-radius:10px;max-height:90vh;overflow:auto}
 #connect input{width:100%;padding:8px;margin:8px 0}
+#connect{flex-direction:column;gap:10px}
+#connect .card[hidden]{display:none}
+#c-msg{max-width:560px;width:100%;margin:0;color:#fff;text-align:center;min-height:1.2em}
+#c-msg:empty{display:none}
+#connect .google{font-size:16px;padding:10px 18px;margin:6px 0}
+#connect .small{font-size:13px;margin-top:14px}
 img.loading,img.failed{min-height:40px;color:#64748b;font-size:13px}
 img.failed{cursor:pointer;color:#b91c1c}
 

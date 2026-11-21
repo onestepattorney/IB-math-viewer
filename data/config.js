@@ -1,10 +1,9 @@
-// Link mode: files are fetched from the private repo with a read-only token.
+// Sign-in mode: invited Google accounts only; files come from the private Supabase bucket.
 window.IB_REMOTE = {
- "owner": "onestepattorney",
- "repo": "IB-math",
- "ref": "main",
- "base": "app/",
- "apiBase": "https://api.github.com"
+ "kind": "supabase",
+ "url": "https://ojdyhdufhhgaorlqmwkk.supabase.co",
+ "key": "sb_publishable_LRoSgsI4DOWj8xQZoqT5OQ_pZu3kn7B",
+ "bucket": "content"
 };
 // Shown in Settings so you can tell which build you are running.
-window.IB_VERSION = "2026-11-11 20:14 UTC";
+window.IB_VERSION = "2026-11-21 14:04 UTC";

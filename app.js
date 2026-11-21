@@ -17,6 +17,12 @@ let listLimit = PAGE, rListLimit = PAGE;
 const REMOTE = window.IB_REMOTE || null;
 const TKEY = "ibmath.token", CACHE = "ibmath-assets-v1";
 const getToken = () => { try { return localStorage.getItem(TKEY) || ""; } catch { return ""; } };
+// Sign-in mode (REMOTE.kind === "supabase"): invited Google accounts only; files come from a private Supabase bucket.
+const SBMODE = !!(REMOTE && REMOTE.kind === "supabase");
+const SB = SBMODE && window.supabase ? window.supabase.createClient(REMOTE.url, REMOTE.key, { auth: { flowType: "pkce" } }) : null;
+const me = { email: "", name: "", teacher: false, solutions: true }; // solutions: may this account see "Show my solution"
+let sbSession = null;
+const connected = () => SBMODE ? !!sbSession : !!getToken();
 class AssetError extends Error {}
 function apiUrl(rel) {
   return `${REMOTE.apiBase}/repos/${REMOTE.owner}/${REMOTE.repo}/contents/${(REMOTE.base || "") + rel}?ref=${encodeURIComponent(REMOTE.ref)}`;
@@ -29,10 +35,21 @@ function explain(status, res) {
   return `GitHub returned HTTP ${status}.`;
 }
 async function loadAsset(rel, fresh) { // -> Blob; fresh = skip the cache (scripts that change on the branch)
-  const cache = fresh ? null : await caches.open(CACHE).catch(() => null);
-  const key = apiUrl(rel).replace(/^https:\/\/[^/]+/, "https://cache.local");
+  const cache = fresh || typeof caches === "undefined" ? null : await caches.open(CACHE).catch(() => null);
+  const key = SBMODE ? "https://cache.local/sb/" + rel : apiUrl(rel).replace(/^https:\/\/[^/]+/, "https://cache.local");
   const hit = cache && await cache.match(key);
   if (hit) return hit.blob();
+  if (SBMODE) {
+    if (!SB) throw new AssetError("The sign-in library did not load. Check your connection and reload the page.");
+    let r;
+    try { r = await SB.storage.from(REMOTE.bucket).download(rel); } catch { throw new AssetError("Network error while loading the file."); }
+    if (r.error || !r.data) {
+      const st = r.error && (r.error.statusCode || r.error.status);
+      throw new AssetError(String(st) === "400" || String(st) === "404" ? "This file is not available for your account." : "Couldn't load the file. Sign in again or retry.");
+    }
+    if (cache) cache.put(key, new Response(r.data.slice(), { headers: { "content-type": r.data.type || "application/octet-stream" } })).catch(() => {});
+    return r.data;
+  }
   const token = getToken();
   if (!token) throw new AssetError("Not connected: add a GitHub token first.");
   let res;
@@ -92,7 +109,7 @@ async function loadRemoteScript(rel) {
   URL.revokeObjectURL(url);
 }
 async function loadRemoteExtras() { // video id list and hidden bands; the app works without them
-  if (!REMOTE || !getToken()) return;
+  if (!REMOTE || !connected()) return;
   await Promise.all(["data/videos/index.js", "data/qcut.js"].map((r) => loadRemoteScript(r).catch(() => {})));
 }
 let vFontDone = false;
@@ -101,9 +118,50 @@ function vLoadFont() { // Kalam for the pen notes (style.css points at vendor/ka
   loadAsset("vendor/kalam/kalam-subset.woff2").then((b) => b.arrayBuffer())
     .then((buf) => new FontFace("Kalam", buf, { weight: "400" }).load()).then((f) => document.fonts.add(f)).catch(() => { vFontDone = false; });
 }
-function prefetch(rels) { if (REMOTE && getToken()) rels.filter(Boolean).forEach((r) => loadAsset(r).catch(() => {})); }
+function prefetch(rels) { if (REMOTE && connected()) rels.filter(Boolean).forEach((r) => loadAsset(r).catch(() => {})); }
+
+// Sign-in card (Supabase mode). A Google account that is not on the teacher's list is refused when it signs up
+// (Auth hook) and comes back here with an error; an account removed later is caught by is_member.
+function urlAuthError() {
+  const qs = new URLSearchParams(location.search), hs = new URLSearchParams(location.hash.slice(1));
+  const d = qs.get("error_description") || hs.get("error_description") || qs.get("error") || hs.get("error");
+  if (d) history.replaceState(null, "", location.pathname);
+  return d ? d.replace(/\+/g, " ") : "";
+}
+async function signOut() {
+  if (typeof caches !== "undefined") await caches.delete(CACHE).catch(() => {});
+  if (SB) await SB.auth.signOut().catch(() => {});
+  location.replace(location.pathname);
+}
+async function signInCard() {
+  const card = $("connect"), msg = $("c-msg");
+  $("c-github").hidden = true; $("c-signin").hidden = false;
+  if (!SB) { card.hidden = false; msg.textContent = "The sign-in library did not load. Check your connection and reload the page."; return new Promise(() => {}); }
+  const err = urlAuthError();
+  const { data } = await SB.auth.getSession().catch(() => ({ data: {} }));
+  sbSession = data && data.session;
+  if (sbSession) {
+    const [mem, tea, sol] = await Promise.all(["is_member", "is_teacher", "solutions_open"].map((f) => SB.rpc(f).then((r) => r.data, () => null)));
+    const u = sbSession.user || {}, md = u.user_metadata || {};
+    me.email = u.email || ""; me.name = md.full_name || md.name || ""; me.teacher = !!tea; me.solutions = !!tea || !!sol;
+    if (mem) return;
+    card.hidden = false; $("c-google").hidden = true; $("c-out").hidden = false;
+    msg.textContent = `${me.email} is not on the list for this app. Ask your teacher to add it, or sign out and use another Google account.`;
+    $("c-out").onclick = signOut;
+    return new Promise(() => {});
+  }
+  card.hidden = false;
+  if (err) msg.textContent = /not invited|signups? not allowed|signup/i.test(err) ? "This Google account is not invited. Ask your teacher to add it, then sign in again." : "Sign-in failed: " + err;
+  $("c-google").onclick = async () => {
+    msg.textContent = "Opening Google…";
+    const { error } = await SB.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+    if (error) msg.textContent = "Sign-in failed: " + error.message;
+  };
+  return new Promise(() => {}); // the page reloads after Google
+}
 
 async function connectCard() { // returns when connected (local mode: immediately)
+  if (SBMODE) return signInCard();
   if (!REMOTE || getToken()) return;
   const card = $("connect"); card.hidden = false;
   await new Promise((done) => {
@@ -312,7 +370,7 @@ function toggleMark() {
 
 // ---- own solution PDF (data/solutions/*.pdf), opened at the page where the question starts ----
 function setupSolution(q) {
-  const has = !!q.my_solution;
+  const has = !!q.my_solution && me.solutions;
   $("toggle-sol").hidden = !has;
   $("toggle-sol").textContent = "Show my solution";
   $("sol-panel").hidden = true; setImage($("sol-img"), null); $("toggle-sol").classList.add("primary"); updateCover();
@@ -321,7 +379,7 @@ function setupSolution(q) {
   $("sol-note").textContent = p ? `My solution for this question only (PDF page${p[0] === p[1] ? " " + p[0] : "s " + p[0] + "–" + p[1]} of ${p[2]}).` : "";
 }
 function toggleSolution() {
-  if (!current || !current.my_solution) return;
+  if (!current || !current.my_solution || !me.solutions) return;
   const panel = $("sol-panel"), show = panel.hidden;
   panel.hidden = !show;
   $("toggle-sol").textContent = show ? "Hide my solution" : "Show my solution";
@@ -962,6 +1020,11 @@ function setupSettings() {
   $("notice-close").onclick = () => { $("notice").hidden = true; };
   if (window.IB_VERSION) { $("version").textContent = "Version: " + window.IB_VERSION; $("version").hidden = false; }
   $("conn-box").hidden = !REMOTE;
+  if (SBMODE) {
+    $("conn-who").hidden = false;
+    $("conn-who").textContent = `Signed in as ${me.name ? me.name + " (" + me.email + ")" : me.email}${me.teacher ? " · teacher" : ""}`;
+    $("disconnect").textContent = "Sign out"; $("disconnect").onclick = signOut;
+  } else
   $("disconnect").onclick = () => { try { localStorage.removeItem(TKEY); } catch {} location.reload(); };
   $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
 }
