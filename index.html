@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css?v=202611211404">
+<link rel="stylesheet" href="style.css?v=202611211423">
 </head>
 <body>
 <div id="boot-msg" style="padding:14px 20px;background:#fef3c7;color:#78350f;font:14px system-ui,sans-serif">Loading&hellip; If this yellow message stays, the files next to this page are missing (style.css, app.js, data/). Extract or clone the <b>whole</b> repository folder &mdash; do not copy index.html on its own &mdash; and open <code>app/index.html</code> from inside it.</div>
@@ -35,6 +35,7 @@
   <div class="sheet" role="dialog" aria-label="Settings">
     <div class="sheet-head"><h2>Settings</h2><button id="settings-close" aria-label="Close">&times;</button></div>
     <p id="review-stats" class="muted"></p>
+    <div id="tag-sec">
     <h3>Tag editor</h3>
     <p class="muted">Fix a question's topic, subtopic or difficulty if it looks wrong.</p>
     <div class="row">
@@ -42,6 +43,7 @@
       <button id="edit-tags" hidden>Fix the open question</button>
     </div>
     <p id="set-q-label" class="muted" hidden></p>
+    </div>
     <h3>Backup</h3>
     <p class="muted">Your tag edits and &#9873; review-later marks live in this browser only. Export them to keep a copy or move them to another device.</p>
     <div class="row">
@@ -51,7 +53,7 @@
     <h3>Reset</h3>
     <div class="row">
       <button id="clear-marks">Clear all &#9873; marks</button>
-      <button id="reset-overrides">Discard all my tag edits</button>
+      <button id="reset-overrides" class="tag-only">Discard all my tag edits</button>
     </div>
     <p id="version" class="muted" hidden></p>
     <div id="conn-box" hidden>
@@ -71,6 +73,7 @@
     <button data-view="browse" class="active">Browse</button>
     <button data-view="practice">Practice</button>
     <button data-view="review" id="nav-review" hidden>Tag editor</button>
+    <button data-view="teacher" id="nav-teacher" hidden>Students</button>
   </nav>
   <button id="open-settings" class="icon-btn" aria-label="Settings" title="Settings">&#9881;</button>
 </header>
@@ -197,6 +200,29 @@
   </div>
 </main>
 
+<main id="teacher" hidden>
+  <section class="t-sec">
+    <h2>Students</h2>
+    <p class="muted">Only the Google accounts on this list can sign in. Add a student's Gmail address exactly as they use it.</p>
+    <form id="t-add" class="t-add" autocomplete="off">
+      <label class="grow">Gmail address<input id="t-email" type="email" required placeholder="student@gmail.com"></label>
+      <label class="grow">Name (optional)<input id="t-name" type="text" placeholder="Kim Minji"></label>
+      <button class="primary" type="submit">Add student</button>
+    </form>
+    <p id="t-msg" class="t-msg" aria-live="polite"></p>
+    <div class="t-table-wrap"><table class="t-table">
+      <thead><tr><th>Student</th><th>Status</th><th>First sign-in</th><th>Last seen</th><th></th></tr></thead>
+      <tbody id="t-rows"></tbody>
+    </table></div>
+    <p id="t-empty" class="muted" hidden>No students yet. Add the first one above.</p>
+  </section>
+  <section class="t-sec">
+    <h2>Sharing</h2>
+    <label class="t-switch"><input id="t-sol" type="checkbox"> <span>Students can see my solutions ("Show my solution")</span></label>
+    <p id="t-sol-msg" class="muted" aria-live="polite"></p>
+  </section>
+</main>
+
 <main id="review" class="split" hidden>
   <aside id="r-side" class="side">
     <div class="list-head"><span id="r-count"></span><button class="list-close" id="r-list-close">Close &times;</button></div>
@@ -248,10 +274,10 @@
   </section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" crossorigin="anonymous"></script>
-<script src="data/config.js?v=202611211404"></script>
+<script src="data/config.js?v=202611211423"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-<script src="data/data.js?v=202611211404"></script>
-<script src="app.js?v=202611211404"></script>
+<script src="data/data.js?v=202611211423"></script>
+<script src="app.js?v=202611211423"></script>
 </body>
 </html>

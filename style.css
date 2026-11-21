@@ -270,3 +270,36 @@ img.failed{cursor:pointer;color:#b91c1c}
 #vid-board .sketch .gdc-plot{background:#fff}
 #vid-board .sketch .gdc-plot .gl{fill:#b42318}
 #vid-board .ln.cont{break-before:avoid}
+
+/* ---- teacher screen (sign-in mode) ---- */
+#teacher{padding:8px 20px 40px;max-width:1000px}
+.t-sec{margin:14px 0 26px}
+.t-sec h2{font-size:18px;margin:0 0 4px}
+.t-add{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:12px 0 6px}
+.t-add label{min-width:220px}
+.t-msg{min-height:1.2em;margin:4px 0 10px;font-size:14px}
+.t-msg.err{color:#dc2626}.t-msg.ok{color:var(--ok)}
+.t-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.t-table{border-collapse:collapse;width:100%;font-size:14px}
+.t-table th,.t-table td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.t-table tr:last-child td{border-bottom:0}
+.t-table th{font-size:12px;color:var(--mute);font-weight:600}
+.t-table td.who b{display:block;font-weight:600}
+.t-table td.who span{color:var(--mute);font-size:13px}
+.t-table td.act{text-align:right}
+.t-table td.act button{margin-left:6px;padding:4px 10px;font-size:13px}
+.t-st{display:inline-block;padding:1px 8px;border-radius:999px;border:1px solid var(--line);font-size:12px}
+.t-st.on{border-color:var(--ok);color:var(--ok)}.t-st.off{border-color:var(--warn);color:var(--warn)}
+.t-switch{flex-direction:row;align-items:center;gap:8px;font-size:15px;color:var(--fg);margin:8px 0}
+.t-switch input{min-height:0;width:18px;height:18px}
+@media (max-width:700px){
+  #teacher{padding:6px 16px 30px}
+  .t-add label{min-width:0;flex-basis:100%}
+  .t-table thead{display:none}
+  .t-table tr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .t-table tr:last-child{border-bottom:0}
+  .t-table td{padding:0;border:0;white-space:normal}
+  .t-table td.dt{grid-column:1 / -1;color:var(--mute);font-size:12px}
+  .t-table td.act{grid-column:1 / -1;text-align:left;margin-top:6px}
+  .t-table td.act button{margin:0 6px 0 0}
+}

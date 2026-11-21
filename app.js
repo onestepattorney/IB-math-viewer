@@ -143,8 +143,8 @@ async function signInCard() {
   if (sbSession) {
     const [mem, tea, sol] = await Promise.all(["is_member", "is_teacher", "solutions_open"].map((f) => SB.rpc(f).then((r) => r.data, () => null)));
     const u = sbSession.user || {}, md = u.user_metadata || {};
-    me.email = u.email || ""; me.name = md.full_name || md.name || ""; me.teacher = !!tea; me.solutions = !!tea || !!sol;
-    if (mem) return;
+    me.email = u.email || ""; me.name = md.full_name || md.name || ""; me.teacher = !!tea; me.solutions = !!tea || !!sol; me.id = u.id;
+    if (mem) { SB.from("profiles").update({ last_seen: new Date().toISOString() }).eq("user_id", u.id).then(() => {}, () => {}); return; }
     card.hidden = false; $("c-google").hidden = true; $("c-out").hidden = false;
     msg.textContent = `${me.email} is not on the list for this app. Ask your teacher to add it, or sign out and use another Google account.`;
     $("c-out").onclick = signOut;
@@ -980,7 +980,9 @@ function showNotice(ids) {
   $("notice").hidden = false;
 }
 function openSettings() {
-  $("review-stats").textContent = `${questions.filter((q) => q.edited).length} tag edits by you · ${Object.keys(flags).length} questions marked ⚑`;
+  $("review-stats").textContent = (canEditTags() ? `${questions.filter((q) => q.edited).length} tag edits by you · ` : "") + `${Object.keys(flags).length} questions marked ⚑`;
+  $("tag-sec").hidden = !canEditTags();
+  document.querySelectorAll(".tag-only").forEach((e) => { e.hidden = !canEditTags(); });
   const inPractice = !!(!$("practice").hidden && current);
   $("edit-tags").hidden = $("set-q-label").hidden = !inPractice;
   if (inPractice) $("set-q-label").textContent = `Open question: ${label(current)} — ${current.topic_name} › ${current.subtopic_name}`;
@@ -1029,16 +1031,72 @@ function setupSettings() {
   $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
 }
 
-const VIEWS = ["browse", "practice", "review"];
+const VIEWS = ["browse", "practice", "review", "teacher"];
+const canEditTags = () => !SBMODE || me.teacher; // sign-in mode: the Tag editor is for teachers only
 function showView(v) {
-  if (!VIEWS.includes(v)) v = "browse";
+  if (!VIEWS.includes(v) || (v === "review" && !canEditTags()) || (v === "teacher" && !me.teacher)) v = "browse";
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.view === v));
   for (const id of VIEWS) $(id).hidden = id !== v;
   $("nav-review").hidden = v !== "review";  // the Tag editor tab only shows while you are in it
   try { localStorage.setItem("ibmath.view", v); } catch {}
   if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) openList($("review"), true); }
   if (v === "browse") renderBrowse();
+  if (v === "teacher") renderTeacher();
   window.scrollTo(0, 0);
+}
+
+// ---------------- teacher screen (sign-in mode): students on the list, sharing switch ----------------
+const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+function tMsg(text, kind) { const m = $("t-msg"); m.textContent = text || ""; m.className = "t-msg" + (kind ? " " + kind : ""); }
+async function renderTeacher() {
+  if (!SB || !me.teacher) return;
+  const [mem, prof, sol] = await Promise.all([
+    SB.from("members").select("email,name,active,added_at").order("added_at", { ascending: true }),
+    SB.from("profiles").select("email,name,created_at,last_seen"),
+    SB.rpc("solutions_open"),
+  ]);
+  if (mem.error) { tMsg("Couldn't load the student list: " + mem.error.message, "err"); return; }
+  const byEmail = new Map((prof.data || []).map((p) => [p.email, p]));
+  const rows = mem.data || [];
+  $("t-empty").hidden = rows.length > 0;
+  $("t-rows").innerHTML = rows.map((m) => {
+    const p = byEmail.get(m.email) || {}, name = m.name || p.name || "";
+    return `<tr data-email="${esc(m.email)}"><td class="who">${name ? `<b>${esc(name)}</b>` : ""}<span>${esc(m.email)}</span></td>` +
+      `<td><span class="t-st ${m.active ? "on" : "off"}">${m.active ? "Active" : "Paused"}</span></td>` +
+      `<td class="dt">${p.created_at ? "First sign-in " + fmtDay(p.created_at) : "Not signed in yet"}</td>` +
+      `<td class="dt">${p.last_seen ? "Last seen " + fmtDay(p.last_seen) : ""}</td>` +
+      `<td class="act"><button data-act="${m.active ? "pause" : "resume"}">${m.active ? "Pause" : "Resume"}</button><button data-act="remove">Remove</button></td></tr>`;
+  }).join("");
+  $("t-sol").checked = !!sol.data;
+}
+function setupTeacher() {
+  if (!SBMODE || !me.teacher) return;
+  $("nav-teacher").hidden = false;
+  $("t-add").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = $("t-email").value.trim().toLowerCase(), name = $("t-name").value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { tMsg("That does not look like an email address.", "err"); return; }
+    const r = await SB.from("members").insert({ email, name: name || null });
+    if (r.error) { tMsg(/duplicate|already|23505/i.test(r.error.message + (r.error.code || "")) ? `${email} is already on the list.` : "Couldn't add: " + r.error.message, "err"); return; }
+    $("t-email").value = ""; $("t-name").value = "";
+    tMsg(`Added ${email}. They can sign in now with that Google account.`, "ok"); renderTeacher();
+  });
+  $("t-rows").addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    const email = b.closest("tr").dataset.email, act = b.dataset.act;
+    if (act === "remove" && !confirm(`Remove ${email}? They will not be able to sign in. Their study record is kept.`)) return;
+    const q = SB.from("members");
+    const r = act === "remove" ? await q.delete().eq("email", email) : await q.update({ active: act === "resume" }).eq("email", email);
+    if (r.error) { tMsg("Couldn't change: " + r.error.message, "err"); return; }
+    tMsg(act === "remove" ? `Removed ${email}.` : act === "pause" ? `Paused ${email}: they can't sign in until you resume.` : `Resumed ${email}.`, "ok");
+    renderTeacher();
+  });
+  $("t-sol").addEventListener("change", async () => {
+    const on = $("t-sol").checked;
+    const r = await SB.from("app_settings").update({ value: on }).eq("key", "solutions_for_students");
+    $("t-sol-msg").textContent = r.error ? "Couldn't save: " + r.error.message : on ? "Students can now see your solutions." : "Your solutions are hidden from students.";
+    if (r.error) $("t-sol").checked = !on;
+  });
 }
 
 // ---------------- browse tab: topic index with counts ----------------
@@ -1136,7 +1194,7 @@ async function init() {
   fillSelect($("f-year"), years); fillSelect($("r-year"), years);
   refreshTopicFilters();
   document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showView(b.dataset.view));
-  setupPractice(); setupReview(); setupBrowse(); setupSettings();
+  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher();
   showNotice(aside);
   renderList(true);
   try { bScope = localStorage.getItem("ibmath.scope") || bScope; } catch {}
