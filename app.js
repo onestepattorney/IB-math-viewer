@@ -1133,7 +1133,7 @@ function setupSettings() {
   $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
 }
 
-const VIEWS = ["browse", "practice", "review", "teacher"];
+const VIEWS = ["browse", "practice", "review", "teacher", "exam"];
 const canEditTags = () => !SBMODE || me.teacher; // sign-in mode: the Tag editor is for teachers only
 function showView(v) {
   if (!VIEWS.includes(v) || (v === "review" && !canEditTags()) || (v === "teacher" && !me.teacher)) v = "browse";
@@ -1144,6 +1144,7 @@ function showView(v) {
   if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) openList($("review"), true); }
   if (v === "browse") renderBrowse();
   if (v === "teacher") renderTeacher();
+  if (v === "exam") renderExam();
   window.scrollTo(0, 0);
 }
 
@@ -1215,7 +1216,7 @@ async function showStudent(email) {
   const prof = await SB.from("profiles").select("user_id,email,name").eq("email", email);
   const p = (prof.data || [])[0], box = $("t-detail"); box.hidden = false;
   $("t-d-name").textContent = (p && p.name) ? `${p.name} (${email})` : email;
-  if (!p) { $("t-d-sum").textContent = "This student has not signed in yet."; $("t-d-subs").innerHTML = $("t-d-qs").innerHTML = $("t-d-causes").innerHTML = ""; box.scrollIntoView({ block: "start", behavior: "smooth" }); return; }
+  if (!p) { $("t-d-sum").textContent = "This student has not signed in yet."; $("t-d-subs").innerHTML = $("t-d-qs").innerHTML = $("t-d-causes").innerHTML = $("t-d-ex").innerHTML = ""; box.scrollIntoView({ block: "start", behavior: "smooth" }); return; }
   const r = await SB.from("question_state").select("qid,rating,cause,note,due").eq("user_id", p.user_id);
   const st = {}; for (const x of r.data || []) st[x.qid] = x;
   const byId = new Map(questions.map((q) => [q.id, q]));
@@ -1231,11 +1232,127 @@ async function showStudent(email) {
   const cc = {}; for (const x of rated) if (x.rating !== "got" && x.cause) cc[x.cause] = (cc[x.cause] || 0) + 1;
   const mx = Math.max(1, ...Object.values(cc));
   $("t-d-causes").innerHTML = Object.keys(CAUSE_NAMES).filter((k) => cc[k]).map((k) => `<div class="bar"><span>${CAUSE_NAMES[k]}</span><i style="width:${100 * cc[k] / mx}%"></i><span>${cc[k]}</span></div>`).join("") || '<p class="muted">No reasons given yet.</p>';
+  const exr = await SB.from("exam_attempts").select("paper_id,score,max_score,seconds,limit_min,at").eq("user_id", p.user_id).order("at", { ascending: false });
+  $("t-d-ex").innerHTML = exHistRows(exr.data || []) || `<tr><td colspan="4" class="muted">No timed papers yet.</td></tr>`;
   const bad = rated.filter((x) => x.rating !== "got").sort((a, b) => (a.due || "").localeCompare(b.due || ""));
   $("t-d-qs").innerHTML = bad.map((x) => { const q = byId.get(x.qid);
     return `<tr><td>${label(q)}<br><span class="muted">${esc(q.subtopic_name || "")}</span></td><td><span class="rtag ${x.rating}">${RATING_NAMES[x.rating]}</span></td>` +
       `<td>${x.cause ? esc(CAUSE_NAMES[x.cause] || x.cause) : ""}</td><td class="note">${esc(x.note || "")}</td><td>${x.due ? fmtDay(x.due + "T00:00:00") : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">Nothing to review.</td></tr>`;
   box.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+// ---------------- timed paper: sit a whole paper against the clock, then mark it with the markscheme ----------------
+const EXKEY = "ibmath.exam";  // the paper in progress survives a reload: { pid, left (s), since (ms or 0 when paused), i }
+const paperId = (q) => q.id.replace(/-Q\d+$/, "");
+const paperQs = (pid) => questions.filter((q) => paperId(q) === pid).sort((a, b) => a.q - b.q);
+const limitMin = (q) => q.paper === 3 ? (q.subject === "AI" ? 75 : 60) : q.level === "SL" ? 90 : 120; // IB times from 2021
+const paperName = (pid) => { const q = paperQs(pid)[0]; return q ? `${q.year} ${q.month} ${q.level} ${q.subject} Paper ${q.paper}${q.tz && q.tz !== "TZ0" ? " " + q.tz : ""}` : pid; };
+const fmtClock = (s) => { const a = Math.abs(Math.round(s)), h = Math.floor(a / 3600), m = Math.floor(a / 60) % 60, x = a % 60;
+  return (s < 0 ? "+" : "") + (h ? `${h}:${String(m).padStart(2, "0")}` : String(m)) + ":" + String(x).padStart(2, "0"); };
+let ex = null, exTimer = 0;
+const exLeft = () => ex.left - (ex.since ? (Date.now() - ex.since) / 1000 : 0);
+const exSave = () => lsSet(EXKEY, ex || {});
+function exFill(sel, opts, keep) { const v = keep ? sel.value : ""; sel.innerHTML = opts.map(([a, b]) => `<option value="${esc(a)}">${esc(b)}</option>`).join(""); if (opts.some(([a]) => a === v)) sel.value = v; }
+function exPick() {
+  const sub = $("ex-subject").value, lev = $("ex-level").value;
+  const pool = questions.filter((q) => q.subject === sub && q.level === lev);
+  const sess = [...new Set(pool.map((q) => `${q.year}|${q.month}`))].sort().reverse();
+  exFill($("ex-session"), sess.map((k) => [k, k.replace("|", " ")]), true);
+  const [y, m] = $("ex-session").value.split("|"), sp = pool.filter((q) => String(q.year) === y && q.month === m);
+  exFill($("ex-paper"), [...new Set(sp.map((q) => q.paper))].sort().map((n) => [String(n), "Paper " + n]), true);
+  const pp = sp.filter((q) => String(q.paper) === $("ex-paper").value);
+  exFill($("ex-tz"), [...new Set(pp.map((q) => q.tz))].sort().map((z) => [z, z === "TZ0" ? "—" : z]), true);
+  const qs = pp.filter((q) => q.tz === $("ex-tz").value);
+  $("ex-info").textContent = qs.length ? `${qs.length} questions · ${qs.reduce((a, q) => a + q.marks, 0)} marks · ${limitMin(qs[0])} minutes` : "";
+  $("ex-start").disabled = !qs.length; $("ex-start").dataset.pid = qs.length ? paperId(qs[0]) : "";
+}
+async function renderExam() {
+  const saved = lsGet(EXKEY);
+  if (saved && saved.pid && !ex) ex = saved;
+  if (ex && ex.pid) { ex.marking ? exShowMark() : exShowRun(); return; }
+  $("ex-pick").hidden = false; $("ex-run").hidden = $("ex-mark").hidden = true;
+  exPick();
+  if (SB && me.id) {
+    const r = await SB.from("exam_attempts").select("paper_id,score,max_score,seconds,limit_min,at").eq("user_id", me.id).order("at", { ascending: false });
+    const rows = r.data || []; $("ex-hist-box").hidden = !rows.length; $("ex-hist").innerHTML = exHistRows(rows);
+  }
+}
+const exHistRows = (rows) => rows.map((x) => `<tr><td>${esc(paperName(x.paper_id))}</td><td class="t-num">${x.score} / ${x.max_score} (${Math.round(100 * x.score / x.max_score)}%)</td>` +
+  `<td class="t-num">${fmtClock(x.seconds)} of ${x.limit_min}:00</td><td>${fmtDay(x.at)}</td></tr>`).join("");
+function exShowRun() {
+  $("ex-pick").hidden = $("ex-mark").hidden = true; $("ex-run").hidden = false;
+  const qs = paperQs(ex.pid); $("ex-title").textContent = paperName(ex.pid);
+  $("ex-qnav").innerHTML = qs.map((q, i) => `<button data-i="${i}" class="${i === ex.i ? "on" : ""}">Q${q.q}</button>`).join("");
+  setImage($("ex-img"), qs[ex.i].img); prefetch([qs[ex.i + 1] && qs[ex.i + 1].img]);
+  $("ex-paused").hidden = !!ex.since; $("ex-pause").textContent = ex.since ? "Pause" : "Resume";
+  exTick(); clearInterval(exTimer); exTimer = setInterval(exTick, 1000);
+}
+function exTick() {
+  if (!ex || $("ex-run").hidden) { clearInterval(exTimer); return; }
+  const l = exLeft(), c = $("ex-clock");
+  c.textContent = l >= 0 ? fmtClock(l) + " left" : fmtClock(l) + " over time";
+  c.classList.toggle("low", l >= 0 && l < 600); c.classList.toggle("over", l < 0);
+}
+function exGo(i) { const n = paperQs(ex.pid).length; ex.i = Math.max(0, Math.min(n - 1, i)); exSave(); exShowRun(); window.scrollTo(0, 0); }
+function exPause(on) { if (on && ex.since) { ex.left = exLeft(); ex.since = 0; } else if (!on && !ex.since) ex.since = Date.now(); exSave(); exShowRun(); }
+function exShowMark() {
+  clearInterval(exTimer);
+  $("ex-pick").hidden = $("ex-run").hidden = true; $("ex-mark").hidden = false;
+  const qs = paperQs(ex.pid), lim = limitMin(qs[0]) * 60, used = lim - ex.left;
+  $("ex-m-title").textContent = "Mark: " + paperName(ex.pid);
+  $("ex-m-time").textContent = `Time used ${fmtClock(Math.max(0, used))} of ${limitMin(qs[0])}:00${used > lim ? " (over time)" : ""}`;
+  ex.got = ex.got || {};
+  $("ex-m-rows").innerHTML = qs.map((q) => `<div class="ex-row" data-q="${q.id}"><div class="ex-row-h"><b>Question ${q.q}</b>` +
+    `<label class="chk">Marks <input type="number" min="0" max="${q.marks}" inputmode="numeric" value="${ex.got[q.id] ?? ""}"> / ${q.marks}</label>` +
+    `<button data-ms>Show markscheme</button><button data-qi>Question</button></div><img data-img hidden alt=""></div>`).join("");
+  exTotal(); $("ex-m-msg").textContent = ""; $("ex-save").disabled = false;
+}
+function exTotal() {
+  const qs = paperQs(ex.pid), max = qs.reduce((a, q) => a + q.marks, 0), got = qs.reduce((a, q) => a + (+ex.got[q.id] || 0), 0);
+  $("ex-m-total").textContent = `${got} / ${max} (${Math.round(100 * got / max)}%)`;
+}
+function setupExam() {
+  for (const id of ["ex-subject", "ex-level", "ex-session", "ex-paper", "ex-tz"]) $(id).addEventListener("change", exPick);
+  $("ex-start").onclick = () => {
+    const pid = $("ex-start").dataset.pid; if (!pid) return;
+    ex = { pid, left: limitMin(paperQs(pid)[0]) * 60, since: Date.now(), i: 0 }; exSave(); exShowRun();
+  };
+  $("ex-qnav").addEventListener("click", (e) => { const b = e.target.closest("button[data-i]"); if (b) exGo(+b.dataset.i); });
+  $("ex-prev").onclick = () => exGo(ex.i - 1); $("ex-next").onclick = () => exGo(ex.i + 1);
+  $("ex-pause").onclick = () => exPause(!!ex.since); $("ex-resume").onclick = () => exPause(false);
+  $("ex-quit").onclick = () => { if (confirm("Quit this paper? Nothing is saved.")) { ex = null; lsSet(EXKEY, {}); clearInterval(exTimer); renderExam(); } };
+  $("ex-finish").onclick = () => { if (!confirm("Stop the clock and mark the paper?")) return; ex.left = exLeft(); ex.since = 0; ex.marking = true; exSave(); exShowMark(); window.scrollTo(0, 0); };
+  $("ex-m-rows").addEventListener("input", (e) => {
+    const row = e.target.closest(".ex-row"); if (!row || e.target.type !== "number") return;
+    const q = questions.find((x) => x.id === row.dataset.q), v = e.target.value === "" ? null : Math.max(0, Math.min(q.marks, Math.round(+e.target.value)));
+    if (v === null) delete ex.got[q.id]; else ex.got[q.id] = v; exSave(); exTotal();
+  });
+  $("ex-m-rows").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    const row = b.closest(".ex-row"), q = questions.find((x) => x.id === row.dataset.q), img = row.querySelector("img[data-img]");
+    const want = b.hasAttribute("data-ms") ? q.ms_img : q.img, open = !img.hidden && img._rel === want;
+    img.hidden = open; if (!open) setImage(img, want);
+    row.querySelector("[data-ms]").textContent = !open && want === q.ms_img ? "Hide markscheme" : "Show markscheme";
+    row.querySelector("[data-qi]").textContent = !open && want === q.img ? "Hide question" : "Question";
+  });
+  $("ex-save").onclick = async () => {
+    const qs = paperQs(ex.pid), miss = qs.filter((q) => ex.got[q.id] == null);
+    if (miss.length && !confirm(`${miss.length} question${miss.length === 1 ? " has" : "s have"} no marks yet; they count as 0. Save anyway?`)) return;
+    const lim = limitMin(qs[0]), score = qs.reduce((a, q) => a + (+ex.got[q.id] || 0), 0), max = qs.reduce((a, q) => a + q.marks, 0);
+    $("ex-save").disabled = true;
+    if (SB && me.id) {
+      const per = {}; for (const q of qs) per[q.id] = +ex.got[q.id] || 0;
+      const r = await SB.from("exam_attempts").insert({ user_id: me.id, paper_id: ex.pid, score, max_score: max, seconds: Math.round(lim * 60 - ex.left), limit_min: lim, per_q: per });
+      if (r.error) { $("ex-m-msg").textContent = "Couldn't save: " + r.error.message; $("ex-m-msg").className = "t-msg err"; $("ex-save").disabled = false; return; }
+      for (const q of qs) { // each question also gets a rating, so it comes back for review like any other
+        const g = +ex.got[q.id] || 0, rt = g >= q.marks ? "got" : g * 2 >= q.marks ? "partly" : "missed", prev = qstate[q.id] || {};
+        await saveState(q.id, { rating: rt, ...schedule(prev, rt), cause: rt === "got" ? null : prev.cause });
+        SB.from("attempts").insert({ user_id: me.id, qid: q.id, rating: rt }).then(() => {}, () => {});
+      }
+    }
+    ex = null; lsSet(EXKEY, {}); renderExam();
+    $("ex-info").textContent = `Saved: ${score} / ${max} (${Math.round(100 * score / max)}%).`;
+  };
 }
 
 // ---------------- browse tab: topic index with counts ----------------
@@ -1340,7 +1457,7 @@ async function init() {
   fillSelect($("f-year"), years); fillSelect($("r-year"), years);
   refreshTopicFilters();
   document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showView(b.dataset.view));
-  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher();
+  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher(); setupExam();
   showNotice(aside);
   renderList(true);
   try { bScope = localStorage.getItem("ibmath.scope") || bScope; } catch {}
