@@ -367,6 +367,29 @@ function statusIs(q, s) {
   if (s === "due") return isDue(st);
   return !!(st && st.rating === s);
 }
+// Weak-topic marks: per subtopic, how many questions were rated and how many are Missed/Partly now.
+function tally(qs, st = qstate) {
+  const r = { tried: 0, missed: 0, partly: 0 };
+  for (const q of qs) { const x = st[q.id]; if (x && x.rating) { r.tried++; if (x.rating === "missed") r.missed++; else if (x.rating === "partly") r.partly++; } }
+  r.score = r.tried ? (r.missed + r.partly / 2) / r.tried : 0;
+  return r;
+}
+const isWeak = (r) => r.tried >= 2 && r.score >= 0.4;
+function progLine(sq) {
+  if (!SBMODE) return "";
+  const r = tally(sq); if (!r.tried) return "";
+  const bad = r.missed + r.partly, cls = isWeak(r) ? "weak" : bad === 0 && r.tried >= 3 ? "good" : "";
+  return `<small class="prog ${cls}">${r.tried} tried${r.missed ? ` · ${r.missed} missed` : ""}${r.partly ? ` · ${r.partly} partly` : ""}</small>`;
+}
+function weakest(pool) { // the weakest subtopic of the course on screen, or null
+  const [level, subject] = bScope.split("|"); let best = null;
+  for (const t of topics[subject]) for (const s of t.subtopics) {
+    if (level !== "HL" && s.hl_only) continue;
+    const r = tally(pool.filter((q) => q.topic === t.id && q.subtopic === s.id));
+    if (isWeak(r) && (!best || r.score > best.r.score || (r.score === best.r.score && r.tried > best.r.tried))) best = { t: t.id, s, r };
+  }
+  return best;
+}
 const rdot = (q) => { const st = qstate[q.id]; return st && st.rating ? `<span class="rdot ${st.rating}" title="${RATING_NAMES[st.rating]}"></span>` : ""; };
 // Spaced review: Missed -> again tomorrow; Partly -> in 3 days; Got it -> 7, 21, 60 days as it keeps being right.
 function schedule(prev, r) {
@@ -1168,6 +1191,7 @@ function setupTeacher() {
     tMsg(`Added ${email}. They can sign in now with that Google account.`, "ok"); renderTeacher();
   });
   $("t-rows").addEventListener("click", async (e) => {
+    const who = e.target.closest("td.who"); if (who) { showStudent(who.closest("tr").dataset.email); return; }
     const b = e.target.closest("button[data-act]"); if (!b) return;
     const email = b.closest("tr").dataset.email, act = b.dataset.act;
     if (act === "remove" && !confirm(`Remove ${email}? They will not be able to sign in. Their study record is kept.`)) return;
@@ -1185,6 +1209,35 @@ function setupTeacher() {
   });
 }
 
+const CAUSE_NAMES = { concept: "Didn't know the method", careless: "Careless slip", misread: "Misread the question", time: "Ran out of time", calculator: "Calculator" };
+async function showStudent(email) {
+  document.querySelectorAll("#t-rows tr").forEach((r) => r.classList.toggle("sel", r.dataset.email === email));
+  const prof = await SB.from("profiles").select("user_id,email,name").eq("email", email);
+  const p = (prof.data || [])[0], box = $("t-detail"); box.hidden = false;
+  $("t-d-name").textContent = (p && p.name) ? `${p.name} (${email})` : email;
+  if (!p) { $("t-d-sum").textContent = "This student has not signed in yet."; $("t-d-subs").innerHTML = $("t-d-qs").innerHTML = $("t-d-causes").innerHTML = ""; box.scrollIntoView({ block: "start", behavior: "smooth" }); return; }
+  const r = await SB.from("question_state").select("qid,rating,cause,note,due").eq("user_id", p.user_id);
+  const st = {}; for (const x of r.data || []) st[x.qid] = x;
+  const byId = new Map(questions.map((q) => [q.id, q]));
+  const rated = Object.values(st).filter((x) => x.rating && byId.has(x.qid));
+  const all = tally(rated.map((x) => byId.get(x.qid)), st);
+  $("t-d-sum").textContent = `${all.tried} questions rated · ${all.missed} missed · ${all.partly} partly · ${all.tried - all.missed - all.partly} got it`;
+  // subtopics, weakest first (course + subtopic number, e.g. "AA 3.4")
+  const subs = new Map();
+  for (const x of rated) { const q = byId.get(x.qid), k = `${q.subject}|${q.subtopic}`; if (!subs.has(k)) subs.set(k, { q, list: [] }); subs.get(k).list.push(q); }
+  const rows = [...subs.values()].map(({ q, list }) => ({ q, r: tally(list, st) })).sort((a, b) => b.r.score - a.r.score || b.r.tried - a.r.tried);
+  $("t-d-subs").innerHTML = rows.slice(0, 12).map(({ q, r }) => `<tr><td class="note" style="color:inherit">${q.subject} ${esc(q.subtopic)} ${esc(q.subtopic_name || "")}</td>` +
+    `<td class="t-num">${r.tried}</td><td class="t-num">${r.missed}</td><td class="t-num">${r.partly}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">No questions rated yet.</td></tr>`;
+  const cc = {}; for (const x of rated) if (x.rating !== "got" && x.cause) cc[x.cause] = (cc[x.cause] || 0) + 1;
+  const mx = Math.max(1, ...Object.values(cc));
+  $("t-d-causes").innerHTML = Object.keys(CAUSE_NAMES).filter((k) => cc[k]).map((k) => `<div class="bar"><span>${CAUSE_NAMES[k]}</span><i style="width:${100 * cc[k] / mx}%"></i><span>${cc[k]}</span></div>`).join("") || '<p class="muted">No reasons given yet.</p>';
+  const bad = rated.filter((x) => x.rating !== "got").sort((a, b) => (a.due || "").localeCompare(b.due || ""));
+  $("t-d-qs").innerHTML = bad.map((x) => { const q = byId.get(x.qid);
+    return `<tr><td>${label(q)}<br><span class="muted">${esc(q.subtopic_name || "")}</span></td><td><span class="rtag ${x.rating}">${RATING_NAMES[x.rating]}</span></td>` +
+      `<td>${x.cause ? esc(CAUSE_NAMES[x.cause] || x.cause) : ""}</td><td class="note">${esc(x.note || "")}</td><td>${x.due ? fmtDay(x.due + "T00:00:00") : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">Nothing to review.</td></tr>`;
+  box.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
 // ---------------- browse tab: topic index with counts ----------------
 let bScope = "HL|AA";
 function renderBrowse() {
@@ -1196,13 +1249,15 @@ function renderBrowse() {
   const mb = $("b-marked"); mb.hidden = !markedN; mb.innerHTML = `&#9873; Review marked (${markedN})`;
   const dueN = SBMODE ? questions.filter((q) => isDue(qstate[q.id])).length : 0;
   $("b-due").hidden = !dueN; $("b-due").textContent = `Review today (${dueN})`;
+  const w = SBMODE ? weakest(pool) : null;
+  $("b-weak").hidden = !w; if (w) { $("b-weak").textContent = `Practise my weakest: ${w.s.id} ${w.s.name}`; $("b-weak").dataset.topic = w.t; $("b-weak").dataset.sub = w.s.id; }
   $("b-cards").innerHTML = topics[subject].map((t) => {
     const tq = pool.filter((q) => q.topic === t.id);
     const rows = t.subtopics.filter((s) => level === "HL" || !s.hl_only).map((s) => {
       const sq = tq.filter((q) => q.subtopic === s.id);
       const dist = [1, 2, 3].map((d) => sq.filter((q) => tier(q.difficulty) === d).length);
       const bar = sq.length ? dist.map((n, i) => n ? `<i class="d${i + 1}" style="width:${100 * n / sq.length}%" title="${TIER_NAMES[i + 1]}: ${n}"></i>` : "").join("") : "";
-      return `<div class="srow ${sq.length ? "" : "zero"}" data-topic="${t.id}" data-sub="${s.id}"><span>${s.id} ${esc(s.name)}${s.hl_only ? '<span class="hl">HL</span>' : ""}</span>` +
+      return `<div class="srow ${sq.length ? "" : "zero"}" data-topic="${t.id}" data-sub="${s.id}"><span>${s.id} ${esc(s.name)}${s.hl_only ? '<span class="hl">HL</span>' : ""}${progLine(sq)}</span>` +
         `<span class="n">${sq.length}</span><span class="dbar">${bar}</span></div>`;
     }).join("");
     return `<div class="card"><h3 data-topic="${t.id}">${t.id}. ${esc(t.name)}<small>${tq.length} questions</small></h3>${rows}</div>`;
@@ -1227,6 +1282,7 @@ function setupBrowse() {
   });
   $("b-marked").onclick = () => goPractice({ marked: true });
   $("b-due").onclick = () => goPractice({ status: "due" });
+  $("b-weak").onclick = () => { const [level, subject] = bScope.split("|"); goPractice({ level, subject, topic: $("b-weak").dataset.topic, sub: $("b-weak").dataset.sub }); };
 }
 function setupPractice() {
   const fbOpen = () => setFiltersOpen(!$("filterbar").classList.contains("open"));
@@ -1292,3 +1348,5 @@ async function init() {
   showView(v);
 }
 init();
+// installable app: only on the https site in sign-in mode (not when index.html is opened from disk)
+if (SBMODE && "serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
