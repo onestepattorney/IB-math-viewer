@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css?v=202611212330">
+<link rel="stylesheet" href="style.css?v=202611221102">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#2f5bea">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -73,11 +73,12 @@
 </div>
 
 <header>
+  <button id="hdr-home" class="icon-btn" aria-label="Home" title="Home">&#8962;</button>
   <h1>IB Math Practice</h1>
   <nav>
-    <button data-view="browse" class="active">Browse</button>
-    <button data-view="practice">Practice</button>
-    <button data-view="exam">Timed paper</button>
+    <button data-view="home" class="active"><i aria-hidden="true">&#8962;</i>Home</button>
+    <button data-view="practice"><i aria-hidden="true">&#9998;</i>Practice</button>
+    <button data-view="browse"><i aria-hidden="true">&#9776;</i>Topics</button>
     <button data-view="review" id="nav-review" hidden>Tag editor</button>
     <button data-view="teacher" id="nav-teacher" hidden>Students</button>
   </nav>
@@ -86,7 +87,27 @@
 
 <div id="notice" class="notice" hidden><span id="notice-text"></span><button id="notice-close">OK</button></div>
 
-<main id="browse">
+<main id="home">
+  <div class="h-wrap">
+    <div class="h-hello"><h2 id="h-hello">IB Math Practice</h2><span id="h-week" class="muted"></span>
+      <label class="h-course">My course<select id="h-scope"><option value="HL|AA">HL Analysis &amp; Approaches</option><option value="SL|AA">SL Analysis &amp; Approaches</option><option value="HL|AI">HL Applications &amp; Interpretation</option><option value="SL|AI">SL Applications &amp; Interpretation</option></select></label></div>
+    <div class="h-cards">
+      <div class="h-card hero" id="h-review"><div class="k">Review today</div><div class="big" id="h-rev-n"></div><div class="h-dots" id="h-rev-dots"></div><div class="s" id="h-rev-s"></div><button id="h-rev-go">Start review</button></div>
+      <div class="h-card" id="h-weak"><div class="k">Weakest subtopic</div><div class="t" id="h-weak-t"></div><div class="s" id="h-weak-s"></div><button class="primary" id="h-weak-go">Practise 5 questions</button></div>
+      <div class="h-card" id="h-cont"><div class="k">Continue</div><div class="t" id="h-cont-t"></div><div class="s" id="h-cont-s"></div><button id="h-cont-go">Resume</button></div>
+    </div>
+    <div class="h-quick">
+      <button data-set="quick">Quick 10<b>mixed, from my weaker topics</b></button>
+      <button data-set="new">New questions<b>10 I have not tried</b></button>
+      <button data-set="hard">Hard with a video<b>10 questions</b></button>
+      <button data-set="all">All questions<b id="h-all-s">every question, with filters</b></button>
+    </div>
+    <div class="h-sub-row"><h3 class="h-sub" id="h-topics-h">My topics</h3><button id="h-all-topics" class="linkish">All subtopics &rarr;</button></div>
+    <div class="h-topics" id="h-topics"></div>
+  </div>
+</main>
+
+<main id="browse" hidden>
   <div class="topbar">
     <div id="b-scope" class="seg">
       <button data-scope="HL|AA">HL Analysis &amp; Approaches</button>
@@ -157,18 +178,21 @@
         <div class="now" id="now"></div>
         <span class="pos" aria-hidden="true"><i id="pos-bar"></i></span>
       </div>
-      <div id="empty">Pick a topic in <b>Browse</b>, or open the question list.</div>
+      <div id="sessbar" hidden><button id="sess-exit" title="Leave this set">&#10005; Exit</button><b id="sess-name"></b><span id="sess-prog" class="sess-prog"></span></div>
+      <div id="empty">Pick a topic in <b>Topics</b>, or open the question list.</div>
+      <div id="sess-done" hidden><h2>Set finished</h2><p id="sess-sum"></p><div class="row"><button id="sess-home" class="primary">Back to Home</button><button id="sess-again">Practise the ones I missed</button></div></div>
       <div id="question" hidden>
         <div id="meta"></div>
         <div id="panes">
           <div class="pane"><h3>Question</h3><div id="qscroll"><div id="qwrap"><img id="q-img" alt="Question"><div id="vid-hl" hidden></div><svg id="vid-ink" aria-hidden="true"></svg></div></div></div>
           <div class="pane" id="ms-pane">
-            <h3>
-              <button id="toggle-ms">Show markscheme</button>
-              <button id="toggle-sol" hidden>Show my solution</button>
-              <button id="toggle-vid" hidden>Watch video</button>
+            <h3 class="ptabs" role="tablist">
+              <button id="toggle-ms" role="tab">Markscheme</button>
+              <button id="toggle-vid" role="tab" hidden>Video</button>
+              <button id="toggle-sol" role="tab" hidden>My solution</button>
+              <button id="toggle-fb" role="tab">Formulas</button>
             </h3>
-            <div id="ms-cover">Try the question first, then press <b>Show markscheme</b>.</div>
+            <div id="ms-cover">Try the question first, then open the <b>Markscheme</b> or the <b>Video</b>.</div>
             <img id="ms-img" alt="Markscheme" hidden>
             <div id="vid-panel" hidden>
               <div id="vid-part" class="muted"></div>
@@ -192,74 +216,40 @@
               </div>
               <p id="vid-note" class="muted" hidden></p>
             </div>
+            <div id="fb-panel" hidden>
+              <div class="fb-chips" id="fb-chips"></div>
+              <div class="fb-pages" id="fb-pages"></div>
+            </div>
             <div id="sol-panel" hidden>
               <p id="sol-note" class="muted"></p>
               <img id="sol-img" alt="My solution">
             </div>
           </div>
         </div>
-        <div id="rate" hidden>
-          <div class="rate-row">
-            <span class="rate-q">How did it go?</span>
-            <button data-r="got">Got it</button><button data-r="partly">Partly</button><button data-r="missed">Missed</button>
-            <span id="rate-state" class="muted" aria-live="polite"></span>
-          </div>
+        <div id="dock">
           <div id="rate-more" hidden>
             <div class="rate-causes"><span class="muted">What went wrong?</span>
               <button data-c="concept">Didn't know the method</button><button data-c="careless">Careless slip</button><button data-c="misread">Misread the question</button><button data-c="time">Ran out of time</button><button data-c="calculator">Calculator</button>
             </div>
             <input id="rate-note" type="text" maxlength="300" placeholder="Note for next time (optional)">
           </div>
+          <div class="dock-in">
+            <div id="rate" hidden>
+              <span class="rate-q">How did it go?</span>
+              <button data-r="got">&#10003; Got it</button><button data-r="partly">~ Partly</button><button data-r="missed">&#10005; Missed</button>
+              <span id="rate-state" class="muted" aria-live="polite"></span>
+            </div>
+            <span class="grow"></span>
+            <span class="dock-keys muted" id="dock-keys"></span>
+            <button id="mark2" class="mark-btn" aria-pressed="false">&#9873; Review later</button>
+            <button id="prev2" aria-label="Previous question">&lsaquo;</button>
+            <button id="next2" class="primary">Next &rarr;</button>
+          </div>
         </div>
-        <div class="actions bottom-nav">
-          <button id="prev2">&lsaquo; Prev</button>
-          <span class="grow"></span>
-          <button id="mark2" class="mark-btn" aria-pressed="false">&#9873; Review later</button>
-          <span class="grow"></span>
-          <button id="next2">Next &rsaquo;</button>
-        </div>
+
       </div>
     </section>
   </div>
-</main>
-
-<main id="exam" hidden>
-  <section id="ex-pick" class="t-sec">
-    <h2>Timed paper</h2>
-    <p class="muted">Sit a whole paper against the clock, then mark it yourself with the markscheme.</p>
-    <div class="t-add">
-      <label>Course<select id="ex-subject"><option value="AA">Analysis &amp; Approaches</option><option value="AI">Applications &amp; Interpretation</option></select></label>
-      <label>Level<select id="ex-level"><option>HL</option><option>SL</option></select></label>
-      <label>Session<select id="ex-session"></select></label>
-      <label>Paper<select id="ex-paper"></select></label>
-      <label>Time zone<select id="ex-tz"></select></label>
-    </div>
-    <p id="ex-info" class="muted"></p>
-    <button id="ex-start" class="primary">Start the clock</button>
-    <div id="ex-hist-box" hidden><h3>My timed papers</h3><div class="t-table-wrap"><table class="t-table"><thead><tr><th>Paper</th><th>Score</th><th>Time</th><th>Date</th></tr></thead><tbody id="ex-hist"></tbody></table></div></div>
-  </section>
-  <section id="ex-run" hidden>
-    <div class="ex-bar">
-      <b id="ex-title"></b>
-      <span id="ex-clock" class="ex-clock"></span>
-      <button id="ex-pause">Pause</button>
-      <button id="ex-finish" class="primary">Finish and mark</button>
-      <button id="ex-quit">Quit</button>
-    </div>
-    <div id="ex-qnav" class="ex-qnav"></div>
-    <div class="ex-q"><img id="ex-img" alt="Question"></div>
-    <div class="actions"><button id="ex-prev">&lsaquo; Prev</button><span class="grow"></span><button id="ex-next">Next &rsaquo;</button></div>
-    <div id="ex-paused" class="ex-paused" hidden><div><p>Paused</p><button id="ex-resume" class="primary">Resume</button></div></div>
-  </section>
-  <section id="ex-mark" class="t-sec" hidden>
-    <h2 id="ex-m-title"></h2>
-    <p id="ex-m-time" class="muted"></p>
-    <p class="muted">Open each markscheme and enter the marks you would get. Full marks count as "Got it", half or more as "Partly", less as "Missed".</p>
-    <div id="ex-m-rows"></div>
-    <div class="ex-total">Total: <b id="ex-m-total"></b></div>
-    <button id="ex-save" class="primary">Save result</button>
-    <p id="ex-m-msg" class="t-msg" aria-live="polite"></p>
-  </section>
 </main>
 
 <main id="teacher" hidden>
@@ -286,8 +276,6 @@
       <div><h3>Weakest subtopics</h3><div class="t-table-wrap"><table class="t-table"><thead><tr><th>Subtopic</th><th>Tried</th><th>Missed</th><th>Partly</th></tr></thead><tbody id="t-d-subs"></tbody></table></div></div>
       <div><h3>Why questions went wrong</h3><div id="t-d-causes" class="t-causes"></div></div>
     </div>
-    <h3>Timed papers</h3>
-    <div class="t-table-wrap"><table class="t-table"><thead><tr><th>Paper</th><th>Score</th><th>Time</th><th>Date</th></tr></thead><tbody id="t-d-ex"></tbody></table></div>
     <h3>Questions to review (Missed or Partly)</h3>
     <div class="t-table-wrap"><table class="t-table"><thead><tr><th>Question</th><th>Result</th><th>Why</th><th>Note</th><th>Next review</th></tr></thead><tbody id="t-d-qs"></tbody></table></div>
   </section>
@@ -349,10 +337,10 @@
   </section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" crossorigin="anonymous"></script>
-<script src="data/config.js?v=202611212330"></script>
+<script src="data/config.js?v=202611221102"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-<script src="data/data.js?v=202611212330"></script>
-<script src="app.js?v=202611212330"></script>
+<script src="data/data.js?v=202611221102"></script>
+<script src="app.js?v=202611221102"></script>
 </body>
 </html>

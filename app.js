@@ -271,7 +271,7 @@ const matcher = (f) => (q) =>
   (!f.month || q.month === f.month) && (!f.tz || q.tz === f.tz) && (!f.qnum || String(q.q) === f.qnum) &&
   (!f.topic || q.topic === f.topic) && (!f.sub || q.subtopic_name === f.sub) &&
   (!f.diff || tier(q.difficulty) === f.diff) && (!f.marked || isMarked(q)) && (!f.status || statusIs(q, f.status));
-const filtered = () => (applied ? questions.filter(matcher(applied)) : []);
+const filtered = () => (sess ? sess.ids.map((id) => QBYID.get(id)).filter(Boolean) : applied ? questions.filter(matcher(applied)) : []);
 function draftText() {
   const parts = FILTER_IDS.filter((id) => $(id).value).map((id) => $(id).selectedOptions[0].text);
   if ($("f-qnum").value) parts.push("Q" + $("f-qnum").value);
@@ -293,6 +293,7 @@ function clearViewer() {
   setImage($("q-img"), null); setImage($("ms-img"), null); showMs(false); setImage($("sol-img"), null); updateMarkUI();
 }
 function applyFilters({ first = false } = {}) {
+  if (sess) { sess = null; $("practice").classList.remove("in-set"); $("sessbar").hidden = true; }
   applied = readDraft(); appliedText = draftText();
   clearViewer();  // the previous question belongs to the previous filters
   renderList(true);
@@ -327,30 +328,64 @@ function renderList(reset) {
 }
 
 function openQuestion(q) {
-  current = q;
+  current = q; try { localStorage.setItem("ibmath.last", q.id); } catch {}
+  $("sess-done").hidden = true;
   $("empty").hidden = true; $("question").hidden = false;
   setImage($("q-img"), q.img); setImage($("ms-img"), q.ms_img); showMs(false);
   const nx = shown[shown.findIndex((x) => x.id === q.id) + 1]; if (nx) prefetch([nx.img]);
   $("meta").innerHTML = `<b>${label(q)}</b> <span>${q.marks} marks${q.section ? " · Section " + esc(q.section) : ""}</span>` +
     (q.topic_name ? ` <span>${esc(q.topic_name)} › ${esc(q.subtopic_name)}</span> ${tierPill(q)}` : "") +
-    (q.edited ? ' <span class="badge edited">edited</span>' : "");
+    (q.edited ? ' <span class="badge edited">edited</span>' : "") + (SBMODE ? lastResult(q) : "");
   setupSolution(q); setupVideo(q); setupRate(q);
+  $("fb-panel").hidden = true; $("toggle-fb").classList.remove("on"); updateCover();
   $("now").innerHTML = `<b>${label(q)}</b> · ${esc(q.subtopic_name || "")}${q.difficulty ? " · " + TIER_NAMES[tier(q.difficulty)] : ""}`;
   updateMarkUI();
-  renderList();
+  renderList(); renderSess();
   $("viewer").scrollTop = 0;
   showViewer($("p-body"));
 }
 // The markscheme sits next to the question (below it on a phone) and stays covered until asked for.
-function updateCover() { $("ms-cover").hidden = !$("ms-img").hidden || !$("sol-panel").hidden || !$("vid-panel").hidden; }
+function updateCover() { $("ms-cover").hidden = !$("ms-img").hidden || !$("sol-panel").hidden || !$("vid-panel").hidden || !$("fb-panel").hidden; }
+// ---- formula booklet (data/formula/<AA|AI>/pNN.webp, pages 3.. hold the formulas): opens at the question's topic ----
+const FB = { AA: { pages: 14 }, AI: { pages: 13 } }, FB_TOPIC = { 0: 3, 1: 4, 2: 6, 3: 7, 4: 10, 5: 12 }; // first page of each topic (same in both)
+const FB_NAMES = { 0: "Prior learning", 1: "1 Number and algebra", 2: "2 Functions", 3: "3 Geometry and trigonometry", 4: "4 Statistics and probability", 5: "5 Calculus" };
+let fbFor = "";
+function fbScroll(page) { const el = $("fb-pages").querySelector(`[data-p="${page}"]`); if (el) $("fb-pages").scrollTop = el.offsetTop - $("fb-pages").offsetTop; }
+function toggleFormulas() {
+  if (!current) return;
+  const show = $("fb-panel").hidden;
+  if (show) closeOthers("fb");
+  $("fb-panel").hidden = !show; $("toggle-fb").classList.toggle("on", show); updateCover();
+  if (!show) return;
+  const sub = current.subject === "AI" ? "AI" : "AA";
+  if (fbFor !== sub) {
+    fbFor = sub; const n = FB[sub].pages;
+    $("fb-chips").innerHTML = Object.entries(FB_NAMES).map(([k, v]) => `<button data-p="${FB_TOPIC[k]}">${v}</button>`).join("");
+    $("fb-pages").innerHTML = Array.from({ length: n - 2 }, (_, i) => `<img data-p="${i + 3}" alt="Formula booklet page ${i + 3}">`).join("");
+    $("fb-pages").querySelectorAll("img").forEach((im) => setImage(im, `data/formula/${sub}/p${String(+im.dataset.p).padStart(2, "0")}.webp`));
+  }
+  const page = FB_TOPIC[current.topic] || 3;
+  $("fb-chips").querySelectorAll("button").forEach((b) => b.classList.toggle("on", +b.dataset.p === page));
+  requestAnimationFrame(() => fbScroll(page));
+  const first = $("fb-pages").querySelector(`[data-p="${page}"]`); if (first && !first.complete) first.addEventListener("load", () => fbScroll(page), { once: true });
+}
+// The right pane is a row of tabs (Markscheme / Video / My solution): one is open at a time; tapping the open one closes it.
+function closeOthers(keep) {
+  if (keep !== "ms" && !$("ms-img").hidden) showMs(false);
+  if (keep !== "fb" && !$("fb-panel").hidden) toggleFormulas();
+  if (keep !== "sol" && !$("sol-panel").hidden) toggleSolution();
+  if (keep !== "vid" && !$("vid-panel").hidden) toggleVideo();
+}
 function showMs(on) {
+  if (on) closeOthers("ms");
   $("ms-img").hidden = !on; updateCover();
-  $("toggle-ms").textContent = on ? "Hide markscheme" : "Show markscheme";
-  $("toggle-ms").classList.toggle("primary", !on);
+  $("toggle-ms").textContent = "Markscheme";
+  $("toggle-ms").classList.toggle("on", on);
 }
 function step(d) {
   if (!shown.length) return;
   const i = shown.findIndex((q) => current && q.id === current.id);
+  if (sess && d > 0 && i === shown.length - 1) { finishSet(); return; }
   openQuestion(shown[i < 0 ? (d > 0 ? 0 : shown.length - 1) : (i + d + shown.length) % shown.length]);
 }
 
@@ -400,7 +435,7 @@ function schedule(prev, r) {
 }
 async function loadState() {
   if (!SB || !me.id) return;
-  const r = await SB.from("question_state").select("qid,rating,cause,note,later,stage,due");
+  const r = await SB.from("question_state").select("qid,rating,cause,note,later,stage,due,updated_at");
   if (r.error) return;
   qstate = {}; for (const x of r.data || []) qstate[x.qid] = x;
   // review-later marks: the server is the record; marks made in this browser before sign-in mode are sent up once
@@ -424,32 +459,41 @@ function rateText(st) {
   if (isDue(st)) return `${RATING_NAMES[st.rating]} · review due now`;
   return `${RATING_NAMES[st.rating]} · next review ${d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}`;
 }
-function setupRate(q) {
-  const show = SBMODE && !!me.id; $("rate").hidden = !show; if (!show) return;
+function lastResult(q) { // "Missed on Nov 21 · Careless slip" above the question, so the same slip is remembered
+  const st = qstate[q.id]; if (!st || !st.rating) return "";
+  const d = st.updated_at ? new Date(st.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  return `<span class="last ${st.rating}">${RATING_NAMES[st.rating]}${d ? " on " + d : ""}${st.cause ? " · " + esc(CAUSE_NAMES[st.cause] || st.cause) : ""}${st.note ? " · “" + esc(st.note) + "”" : ""}</span>`;
+}
+function setupRate(q, open) {
+  const show = SBMODE && !!me.id; $("rate").hidden = !show; $("rate-more").hidden = true;
+  $("dock-keys").textContent = show ? "Keys: 1 2 3 rate · S markscheme · V video · F formulas" : "Keys: S markscheme · V video · F formulas · ← →";
+  if (!show) return;
   const st = qstate[q.id] || {};
   $("rate").querySelectorAll("button[data-r]").forEach((b) => b.classList.toggle("on", b.dataset.r === st.rating));
-  $("rate").querySelectorAll("button[data-c]").forEach((b) => b.classList.toggle("on", b.dataset.c === st.cause));
-  $("rate-more").hidden = !(st.rating === "missed" || st.rating === "partly");
+  $("rate-more").querySelectorAll("button[data-c]").forEach((b) => b.classList.toggle("on", b.dataset.c === st.cause));
+  // the reasons open right after "Missed"/"Partly" is pressed (setupRate(q, true)), not every time the question is opened
+  $("rate-more").hidden = !(open && (st.rating === "missed" || st.rating === "partly"));
   $("rate-note").value = st.note || "";
   $("rate-state").textContent = rateText(st);
 }
 function initRateUI() {
   if (!SBMODE) return;
   $("f-status-wrap").hidden = false;
-  $("rate").addEventListener("click", async (e) => {
+  $("dock").addEventListener("click", async (e) => {
     if (!current) return;
     const q = current, rb = e.target.closest("button[data-r]"), cb = e.target.closest("button[data-c]");
     if (rb) {
       const r = rb.dataset.r, prev = qstate[q.id] || {};
-      const res = await saveState(q.id, { rating: r, ...schedule(prev, r), cause: r === "got" ? null : prev.cause });
+      const res = await saveState(q.id, { rating: r, ...schedule(prev, r), cause: r === "got" ? null : prev.cause, updated_at: new Date().toISOString() });
       if (!res.error) SB.from("attempts").insert({ user_id: me.id, qid: q.id, rating: r }).then(() => {}, () => {});
-      if (current === q) { setupRate(q); if (res.error) $("rate-state").textContent = "Couldn't save: " + res.error.message; }
+      if (sess && sess.ids.includes(q.id)) { sess.rated[q.id] = r; renderSess(); }
+      if (current === q) { setupRate(q, true); if (res.error) $("rate-state").textContent = "Couldn't save: " + res.error.message; }
       renderList(); return;
     }
     if (cb) {
       const st = qstate[q.id] || {}, c = st.cause === cb.dataset.c ? null : cb.dataset.c;
       await saveState(q.id, { cause: c });
-      if (current === q) setupRate(q);
+      if (current === q) setupRate(q, true);
     }
   });
   $("rate-note").addEventListener("change", () => { if (current) saveState(current.id, { note: $("rate-note").value.trim() }); });
@@ -474,8 +518,8 @@ function toggleMark() {
 function setupSolution(q) {
   const has = !!q.my_solution && me.solutions;
   $("toggle-sol").hidden = !has;
-  $("toggle-sol").textContent = "Show my solution";
-  $("sol-panel").hidden = true; setImage($("sol-img"), null); $("toggle-sol").classList.add("primary"); updateCover();
+  $("toggle-sol").textContent = "My solution";
+  $("sol-panel").hidden = true; setImage($("sol-img"), null); $("toggle-sol").classList.remove("on"); updateCover();
   if (!has) return;
   const p = q.my_solution_pages;
   $("sol-note").textContent = p ? `My solution for this question only (PDF page${p[0] === p[1] ? " " + p[0] : "s " + p[0] + "–" + p[1]} of ${p[2]}).` : "";
@@ -483,9 +527,9 @@ function setupSolution(q) {
 function toggleSolution() {
   if (!current || !current.my_solution || !me.solutions) return;
   const panel = $("sol-panel"), show = panel.hidden;
+  if (show) closeOthers("sol");
   panel.hidden = !show;
-  $("toggle-sol").textContent = show ? "Hide my solution" : "Show my solution";
-  $("toggle-sol").classList.toggle("primary", !show);
+  $("toggle-sol").classList.toggle("on", show);
   if (show) setImage($("sol-img"), current.my_solution_img || null);
   updateCover();
 }
@@ -542,8 +586,8 @@ function vLoadYear(id, done) {
 let vCurQ = null;
 function setupVideo(q) {
   vCurQ = q; vStop(); vScript = vOf(q); vBuild();
-  const btn = $("toggle-vid"); btn.hidden = !vHas(q); btn.disabled = false; btn.textContent = "Watch video"; btn.classList.add("primary");
-  $("vid-panel").hidden = true; $("panes").classList.remove("vid-on"); vClearHl(); vInkClear(); updateCover();
+  const btn = $("toggle-vid"); btn.hidden = !vHas(q); btn.disabled = false; btn.textContent = "Video"; btn.classList.remove("on");
+  $("vid-panel").hidden = true; $("panes").classList.remove("vid-on"); document.body.classList.remove("vid-open"); vClearHl(); vInkClear(); updateCover();
 }
 function toggleVideo() {
   if (!vScript) {
@@ -554,14 +598,15 @@ function toggleVideo() {
       if (vCurQ !== q) return; // another question was opened meanwhile
       btn.disabled = false; vScript = vOf(q);
       if (!ok || !vScript) { btn.textContent = "Video could not be loaded"; return; }
-      vBuild(); btn.textContent = "Watch video"; toggleVideo();
+      vBuild(); btn.textContent = "Video"; toggleVideo();
     });
     return;
   }
   const show = $("vid-panel").hidden;
+  if (show) closeOthers("vid");
   $("vid-panel").hidden = !show;
-  $("toggle-vid").textContent = show ? "Hide video" : "Watch video";
-  $("toggle-vid").classList.toggle("primary", !show);
+  $("toggle-vid").classList.toggle("on", show);
+  document.body.classList.toggle("vid-open", show); // phones: the bottom bar steps aside while the video plays
   $("panes").classList.toggle("vid-on", show); buildCut($("q-img"), show ? vVideoCuts() : undefined); if (!show) $("qscroll").scrollTop = 0; else vFitQ(true);
   updateCover();
   if (show) { vPos = { s: 0, i: 0 }; vRender(0, 0); vSetPlay(false); vSceneLabel(); } else { vStop(); vClearHl(); vInkClear(); }
@@ -1133,18 +1178,19 @@ function setupSettings() {
   $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
 }
 
-const VIEWS = ["browse", "practice", "review", "teacher", "exam"];
+const VIEWS = ["home", "browse", "practice", "review", "teacher"];
 const canEditTags = () => !SBMODE || me.teacher; // sign-in mode: the Tag editor is for teachers only
 function showView(v) {
-  if (!VIEWS.includes(v) || (v === "review" && !canEditTags()) || (v === "teacher" && !me.teacher)) v = "browse";
+  if (!VIEWS.includes(v) || (v === "review" && !canEditTags()) || (v === "teacher" && !me.teacher)) v = "home";
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.view === v));
+  document.body.dataset.view = v;
   for (const id of VIEWS) $(id).hidden = id !== v;
   $("nav-review").hidden = v !== "review";  // the Tag editor tab only shows while you are in it
   try { localStorage.setItem("ibmath.view", v); } catch {}
   if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) openList($("review"), true); }
   if (v === "browse") renderBrowse();
+  if (v === "home") renderHome();
   if (v === "teacher") renderTeacher();
-  if (v === "exam") renderExam();
   window.scrollTo(0, 0);
 }
 
@@ -1216,7 +1262,7 @@ async function showStudent(email) {
   const prof = await SB.from("profiles").select("user_id,email,name").eq("email", email);
   const p = (prof.data || [])[0], box = $("t-detail"); box.hidden = false;
   $("t-d-name").textContent = (p && p.name) ? `${p.name} (${email})` : email;
-  if (!p) { $("t-d-sum").textContent = "This student has not signed in yet."; $("t-d-subs").innerHTML = $("t-d-qs").innerHTML = $("t-d-causes").innerHTML = $("t-d-ex").innerHTML = ""; box.scrollIntoView({ block: "start", behavior: "smooth" }); return; }
+  if (!p) { $("t-d-sum").textContent = "This student has not signed in yet."; $("t-d-subs").innerHTML = $("t-d-qs").innerHTML = $("t-d-causes").innerHTML = ""; box.scrollIntoView({ block: "start", behavior: "smooth" }); return; }
   const r = await SB.from("question_state").select("qid,rating,cause,note,due").eq("user_id", p.user_id);
   const st = {}; for (const x of r.data || []) st[x.qid] = x;
   const byId = new Map(questions.map((q) => [q.id, q]));
@@ -1232,8 +1278,6 @@ async function showStudent(email) {
   const cc = {}; for (const x of rated) if (x.rating !== "got" && x.cause) cc[x.cause] = (cc[x.cause] || 0) + 1;
   const mx = Math.max(1, ...Object.values(cc));
   $("t-d-causes").innerHTML = Object.keys(CAUSE_NAMES).filter((k) => cc[k]).map((k) => `<div class="bar"><span>${CAUSE_NAMES[k]}</span><i style="width:${100 * cc[k] / mx}%"></i><span>${cc[k]}</span></div>`).join("") || '<p class="muted">No reasons given yet.</p>';
-  const exr = await SB.from("exam_attempts").select("paper_id,score,max_score,seconds,limit_min,at").eq("user_id", p.user_id).order("at", { ascending: false });
-  $("t-d-ex").innerHTML = exHistRows(exr.data || []) || `<tr><td colspan="4" class="muted">No timed papers yet.</td></tr>`;
   const bad = rated.filter((x) => x.rating !== "got").sort((a, b) => (a.due || "").localeCompare(b.due || ""));
   $("t-d-qs").innerHTML = bad.map((x) => { const q = byId.get(x.qid);
     return `<tr><td>${label(q)}<br><span class="muted">${esc(q.subtopic_name || "")}</span></td><td><span class="rtag ${x.rating}">${RATING_NAMES[x.rating]}</span></td>` +
@@ -1241,118 +1285,101 @@ async function showStudent(email) {
   box.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
-// ---------------- timed paper: sit a whole paper against the clock, then mark it with the markscheme ----------------
-const EXKEY = "ibmath.exam";  // the paper in progress survives a reload: { pid, left (s), since (ms or 0 when paused), i }
+// ---------------- home: what to do today; question sets ----------------
 const paperId = (q) => q.id.replace(/-Q\d+$/, "");
 const paperQs = (pid) => questions.filter((q) => paperId(q) === pid).sort((a, b) => a.q - b.q);
-const limitMin = (q) => q.paper === 3 ? (q.subject === "AI" ? 75 : 60) : q.level === "SL" ? 90 : 120; // IB times from 2021
 const paperName = (pid) => { const q = paperQs(pid)[0]; return q ? `${q.year} ${q.month} ${q.level} ${q.subject} Paper ${q.paper}${q.tz && q.tz !== "TZ0" ? " " + q.tz : ""}` : pid; };
-const fmtClock = (s) => { const a = Math.abs(Math.round(s)), h = Math.floor(a / 3600), m = Math.floor(a / 60) % 60, x = a % 60;
-  return (s < 0 ? "+" : "") + (h ? `${h}:${String(m).padStart(2, "0")}` : String(m)) + ":" + String(x).padStart(2, "0"); };
-let ex = null, exTimer = 0;
-const exLeft = () => ex.left - (ex.since ? (Date.now() - ex.since) / 1000 : 0);
-const exSave = () => lsSet(EXKEY, ex || {});
-function exFill(sel, opts, keep) { const v = keep ? sel.value : ""; sel.innerHTML = opts.map(([a, b]) => `<option value="${esc(a)}">${esc(b)}</option>`).join(""); if (opts.some(([a]) => a === v)) sel.value = v; }
-function exPick() {
-  const sub = $("ex-subject").value, lev = $("ex-level").value;
-  const pool = questions.filter((q) => q.subject === sub && q.level === lev);
-  const sess = [...new Set(pool.map((q) => `${q.year}|${q.month}`))].sort().reverse();
-  exFill($("ex-session"), sess.map((k) => [k, k.replace("|", " ")]), true);
-  const [y, m] = $("ex-session").value.split("|"), sp = pool.filter((q) => String(q.year) === y && q.month === m);
-  exFill($("ex-paper"), [...new Set(sp.map((q) => q.paper))].sort().map((n) => [String(n), "Paper " + n]), true);
-  const pp = sp.filter((q) => String(q.paper) === $("ex-paper").value);
-  exFill($("ex-tz"), [...new Set(pp.map((q) => q.tz))].sort().map((z) => [z, z === "TZ0" ? "—" : z]), true);
-  const qs = pp.filter((q) => q.tz === $("ex-tz").value);
-  $("ex-info").textContent = qs.length ? `${qs.length} questions · ${qs.reduce((a, q) => a + q.marks, 0)} marks · ${limitMin(qs[0])} minutes` : "";
-  $("ex-start").disabled = !qs.length; $("ex-start").dataset.pid = qs.length ? paperId(qs[0]) : "";
+let QBYID = new Map(), sess = null; // sess: a question set being worked through { name, ids, rated: {qid: rating} }
+const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const coursePool = () => { const [level, subject] = bScope.split("|"); return questions.filter((q) => q.level === level && q.subject === subject); };
+function startSet(name, qs, at = 0) {
+  if (!qs.length) { alert("No questions for this set yet."); return; }
+  sess = { name, ids: qs.map((q) => q.id), rated: {} };
+  applied = { ...EMPTY_F }; appliedText = name;
+  $("practice").classList.add("in-set"); $("sessbar").hidden = false; $("sess-name").textContent = name;
+  showView("practice"); renderList(true);
+  if (!isNarrow()) $("p-body").classList.add("collapsed");
+  openQuestion(qs[Math.min(at, qs.length - 1)]);
 }
-async function renderExam() {
-  const saved = lsGet(EXKEY);
-  if (saved && saved.pid && !ex) ex = saved;
-  if (ex && ex.pid) { ex.marking ? exShowMark() : exShowRun(); return; }
-  $("ex-pick").hidden = false; $("ex-run").hidden = $("ex-mark").hidden = true;
-  exPick();
-  if (SB && me.id) {
-    const r = await SB.from("exam_attempts").select("paper_id,score,max_score,seconds,limit_min,at").eq("user_id", me.id).order("at", { ascending: false });
-    const rows = r.data || []; $("ex-hist-box").hidden = !rows.length; $("ex-hist").innerHTML = exHistRows(rows);
-  }
+function exitSet() { sess = null; $("practice").classList.remove("in-set"); $("sessbar").hidden = true; $("sess-done").hidden = true; clearAll(); }
+function renderSess() {
+  if (!sess) return;
+  const i = sess.ids.indexOf(current && current.id);
+  $("sess-name").textContent = `${sess.name} · ${i >= 0 ? i + 1 : "–"} of ${sess.ids.length}`;
+  $("sess-prog").innerHTML = sess.ids.map((id) => `<i class="${sess.rated[id] || (current && current.id === id ? "cur" : "")}"></i>`).join("");
 }
-const exHistRows = (rows) => rows.map((x) => `<tr><td>${esc(paperName(x.paper_id))}</td><td class="t-num">${x.score} / ${x.max_score} (${Math.round(100 * x.score / x.max_score)}%)</td>` +
-  `<td class="t-num">${fmtClock(x.seconds)} of ${x.limit_min}:00</td><td>${fmtDay(x.at)}</td></tr>`).join("");
-function exShowRun() {
-  $("ex-pick").hidden = $("ex-mark").hidden = true; $("ex-run").hidden = false;
-  const qs = paperQs(ex.pid); $("ex-title").textContent = paperName(ex.pid);
-  $("ex-qnav").innerHTML = qs.map((q, i) => `<button data-i="${i}" class="${i === ex.i ? "on" : ""}">Q${q.q}</button>`).join("");
-  setImage($("ex-img"), qs[ex.i].img); prefetch([qs[ex.i + 1] && qs[ex.i + 1].img]);
-  $("ex-paused").hidden = !!ex.since; $("ex-pause").textContent = ex.since ? "Pause" : "Resume";
-  exTick(); clearInterval(exTimer); exTimer = setInterval(exTick, 1000);
+function finishSet() {
+  const r = Object.values(sess.rated), n = (k) => r.filter((x) => x === k).length;
+  clearViewer(); $("empty").hidden = true; $("sess-done").hidden = false;
+  $("sess-sum").textContent = `${sess.ids.length} questions · ${n("got")} got it · ${n("partly")} partly · ${n("missed")} missed` + (r.length < sess.ids.length ? ` · ${sess.ids.length - r.length} not rated` : "");
+  $("sess-again").hidden = !(n("missed") + n("partly"));
+  window.scrollTo(0, 0);
 }
-function exTick() {
-  if (!ex || $("ex-run").hidden) { clearInterval(exTimer); return; }
-  const l = exLeft(), c = $("ex-clock");
-  c.textContent = l >= 0 ? fmtClock(l) + " left" : fmtClock(l) + " over time";
-  c.classList.toggle("low", l >= 0 && l < 600); c.classList.toggle("over", l < 0);
+const SETS = {
+  due: () => shuffle(questions.filter((q) => isDue(qstate[q.id]))),
+  weak: () => { const w = weakest(coursePool()); if (!w) return [];
+    const qs = coursePool().filter((q) => q.topic === w.t && q.subtopic === w.s.id), rank = (q) => { const st = qstate[q.id]; return !st || !st.rating ? 1 : st.rating === "got" ? 2 : 0; };
+    return shuffle(qs).sort((a, b) => rank(a) - rank(b)).slice(0, 5); },
+  quick: () => { const pool = coursePool(), weakSubs = new Set();
+    for (const q of pool) { const k = q.topic + "|" + q.subtopic; if (!weakSubs.has(k) && isWeak(tally(pool.filter((x) => x.topic === q.topic && x.subtopic === q.subtopic)))) weakSubs.add(k); }
+    const score = (q) => { const st = qstate[q.id] || {}; return (st.rating === "missed" ? 3 : st.rating === "partly" ? 2 : !st.rating ? 1.5 : 0) + (weakSubs.has(q.topic + "|" + q.subtopic) ? 2 : 0) + Math.random() * 2; };
+    return shuffle(pool.map((q) => [score(q), q]).sort((a, b) => b[0] - a[0]).slice(0, 10).map((x) => x[1])); },
+  new: () => shuffle(coursePool().filter((q) => !(qstate[q.id] && qstate[q.id].rating))).slice(0, 10),
+  hard: () => shuffle(coursePool().filter((q) => tier(q.difficulty) === 3 && vHas(q))).slice(0, 10),
+};
+const SET_NAMES = { due: "Review", weak: "Weakest subtopic", quick: "Quick 10", new: "New questions", hard: "Hard with a video" };
+function renderHome() {
+  $("h-scope").value = bScope;
+  const hr = new Date().getHours(), first = (me.name || "").split(" ")[0];
+  $("h-hello").textContent = SBMODE && first ? `Good ${hr < 12 ? "morning" : hr < 18 ? "afternoon" : "evening"}, ${first}` : "IB Math Practice";
+  const week = Date.now() - 7 * 864e5, recent = Object.values(qstate).filter((x) => x.rating && x.updated_at && Date.parse(x.updated_at) > week);
+  const days = new Set(recent.map((x) => x.updated_at.slice(0, 10))).size;
+  $("h-week").textContent = SBMODE ? `This week: ${recent.length} question${recent.length === 1 ? "" : "s"} · ${days} day${days === 1 ? "" : "s"}` : "";
+  // review today
+  const due = questions.filter((q) => isDue(qstate[q.id])), dn = (k) => due.filter((q) => qstate[q.id].rating === k).length;
+  $("h-rev-n").textContent = due.length ? `${due.length} question${due.length === 1 ? "" : "s"}` : "All caught up";
+  $("h-rev-dots").innerHTML = due.slice(0, 24).map((q) => `<i class="${qstate[q.id].rating}"></i>`).join("");
+  $("h-rev-s").textContent = due.length ? `${dn("missed")} missed · ${dn("partly")} partly · ${dn("got")} to check again, about ${Math.max(5, Math.round(due.reduce((a, q) => a + q.marks, 0) * 1.1 / 5) * 5)} minutes`
+    : SBMODE ? "Nothing to review today. Rate questions as you practise and they come back here on the right day." : "Sign in to keep a study record.";
+  $("h-rev-go").hidden = !due.length;
+  // weakest subtopic
+  const w = SBMODE ? weakest(coursePool()) : null;
+  $("h-weak-t").textContent = w ? `${w.s.id} ${w.s.name}` : "Not known yet";
+  $("h-weak-s").textContent = w ? `${w.r.missed + w.r.partly} of ${w.r.tried} not right yet` : "Rate a few questions and your weakest subtopic shows up here.";
+  $("h-weak-go").hidden = !w;
+  // continue
+  let last = null; try { last = QBYID.get(localStorage.getItem("ibmath.last")); } catch {}
+  $("h-cont").hidden = !last;
+  if (last) { $("h-cont-t").textContent = `${label(last)}`; $("h-cont-s").textContent = `${last.subtopic_name || ""}${last.difficulty ? " · " + TIER_NAMES[tier(last.difficulty)] : ""}`; }
+  // topics of my course
+  const [level, subject] = bScope.split("|"), pool = coursePool();
+  $("h-topics-h").textContent = `My topics · ${$("h-scope").selectedOptions[0].text}`;
+  $("h-all-s").textContent = `all ${pool.length} in ${level} ${subject}, with filters`;
+  $("h-topics").innerHTML = topics[subject].map((t) => {
+    const tq = pool.filter((q) => q.topic === t.id), r = tally(tq), n = tq.length || 1;
+    const weakS = t.subtopics.filter((s) => (level === "HL" || !s.hl_only) && isWeak(tally(tq.filter((q) => q.subtopic === s.id)))).map((s) => s.id);
+    const got = r.tried - r.missed - r.partly;
+    return `<button class="h-tp" data-topic="${t.id}"><span class="n">${t.id}. ${esc(t.name)}</span>` +
+      `<span class="bar"><i class="g" style="width:${100 * got / n}%"></i><i class="y" style="width:${100 * r.partly / n}%"></i><i class="r" style="width:${100 * r.missed / n}%"></i></span>` +
+      `<span class="s ${weakS.length ? "w" : ""}">${weakS.length ? "Needs work · " + weakS.slice(0, 2).join(", ") : SBMODE ? `${r.tried} of ${tq.length} tried` : `${tq.length} questions`}</span></button>`;
+  }).join("");
 }
-function exGo(i) { const n = paperQs(ex.pid).length; ex.i = Math.max(0, Math.min(n - 1, i)); exSave(); exShowRun(); window.scrollTo(0, 0); }
-function exPause(on) { if (on && ex.since) { ex.left = exLeft(); ex.since = 0; } else if (!on && !ex.since) ex.since = Date.now(); exSave(); exShowRun(); }
-function exShowMark() {
-  clearInterval(exTimer);
-  $("ex-pick").hidden = $("ex-run").hidden = true; $("ex-mark").hidden = false;
-  const qs = paperQs(ex.pid), lim = limitMin(qs[0]) * 60, used = lim - ex.left;
-  $("ex-m-title").textContent = "Mark: " + paperName(ex.pid);
-  $("ex-m-time").textContent = `Time used ${fmtClock(Math.max(0, used))} of ${limitMin(qs[0])}:00${used > lim ? " (over time)" : ""}`;
-  ex.got = ex.got || {};
-  $("ex-m-rows").innerHTML = qs.map((q) => `<div class="ex-row" data-q="${q.id}"><div class="ex-row-h"><b>Question ${q.q}</b>` +
-    `<label class="chk">Marks <input type="number" min="0" max="${q.marks}" inputmode="numeric" value="${ex.got[q.id] ?? ""}"> / ${q.marks}</label>` +
-    `<button data-ms>Show markscheme</button><button data-qi>Question</button></div><img data-img hidden alt=""></div>`).join("");
-  exTotal(); $("ex-m-msg").textContent = ""; $("ex-save").disabled = false;
-}
-function exTotal() {
-  const qs = paperQs(ex.pid), max = qs.reduce((a, q) => a + q.marks, 0), got = qs.reduce((a, q) => a + (+ex.got[q.id] || 0), 0);
-  $("ex-m-total").textContent = `${got} / ${max} (${Math.round(100 * got / max)}%)`;
-}
-function setupExam() {
-  for (const id of ["ex-subject", "ex-level", "ex-session", "ex-paper", "ex-tz"]) $(id).addEventListener("change", exPick);
-  $("ex-start").onclick = () => {
-    const pid = $("ex-start").dataset.pid; if (!pid) return;
-    ex = { pid, left: limitMin(paperQs(pid)[0]) * 60, since: Date.now(), i: 0 }; exSave(); exShowRun();
-  };
-  $("ex-qnav").addEventListener("click", (e) => { const b = e.target.closest("button[data-i]"); if (b) exGo(+b.dataset.i); });
-  $("ex-prev").onclick = () => exGo(ex.i - 1); $("ex-next").onclick = () => exGo(ex.i + 1);
-  $("ex-pause").onclick = () => exPause(!!ex.since); $("ex-resume").onclick = () => exPause(false);
-  $("ex-quit").onclick = () => { if (confirm("Quit this paper? Nothing is saved.")) { ex = null; lsSet(EXKEY, {}); clearInterval(exTimer); renderExam(); } };
-  $("ex-finish").onclick = () => { if (!confirm("Stop the clock and mark the paper?")) return; ex.left = exLeft(); ex.since = 0; ex.marking = true; exSave(); exShowMark(); window.scrollTo(0, 0); };
-  $("ex-m-rows").addEventListener("input", (e) => {
-    const row = e.target.closest(".ex-row"); if (!row || e.target.type !== "number") return;
-    const q = questions.find((x) => x.id === row.dataset.q), v = e.target.value === "" ? null : Math.max(0, Math.min(q.marks, Math.round(+e.target.value)));
-    if (v === null) delete ex.got[q.id]; else ex.got[q.id] = v; exSave(); exTotal();
-  });
-  $("ex-m-rows").addEventListener("click", (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    const row = b.closest(".ex-row"), q = questions.find((x) => x.id === row.dataset.q), img = row.querySelector("img[data-img]");
-    const want = b.hasAttribute("data-ms") ? q.ms_img : q.img, open = !img.hidden && img._rel === want;
-    img.hidden = open; if (!open) setImage(img, want);
-    row.querySelector("[data-ms]").textContent = !open && want === q.ms_img ? "Hide markscheme" : "Show markscheme";
-    row.querySelector("[data-qi]").textContent = !open && want === q.img ? "Hide question" : "Question";
-  });
-  $("ex-save").onclick = async () => {
-    const qs = paperQs(ex.pid), miss = qs.filter((q) => ex.got[q.id] == null);
-    if (miss.length && !confirm(`${miss.length} question${miss.length === 1 ? " has" : "s have"} no marks yet; they count as 0. Save anyway?`)) return;
-    const lim = limitMin(qs[0]), score = qs.reduce((a, q) => a + (+ex.got[q.id] || 0), 0), max = qs.reduce((a, q) => a + q.marks, 0);
-    $("ex-save").disabled = true;
-    if (SB && me.id) {
-      const per = {}; for (const q of qs) per[q.id] = +ex.got[q.id] || 0;
-      const r = await SB.from("exam_attempts").insert({ user_id: me.id, paper_id: ex.pid, score, max_score: max, seconds: Math.round(lim * 60 - ex.left), limit_min: lim, per_q: per });
-      if (r.error) { $("ex-m-msg").textContent = "Couldn't save: " + r.error.message; $("ex-m-msg").className = "t-msg err"; $("ex-save").disabled = false; return; }
-      for (const q of qs) { // each question also gets a rating, so it comes back for review like any other
-        const g = +ex.got[q.id] || 0, rt = g >= q.marks ? "got" : g * 2 >= q.marks ? "partly" : "missed", prev = qstate[q.id] || {};
-        await saveState(q.id, { rating: rt, ...schedule(prev, rt), cause: rt === "got" ? null : prev.cause });
-        SB.from("attempts").insert({ user_id: me.id, qid: q.id, rating: rt }).then(() => {}, () => {});
-      }
-    }
-    ex = null; lsSet(EXKEY, {}); renderExam();
-    $("ex-info").textContent = `Saved: ${score} / ${max} (${Math.round(100 * score / max)}%).`;
-  };
+// the page keeps room below the content for the bottom dock, whatever its height (it grows when the reasons open)
+if (window.ResizeObserver) new ResizeObserver((es) => { for (const e of es) document.documentElement.style.setProperty("--dockh", Math.ceil(e.contentRect.height) + "px"); }).observe(document.getElementById("dock"));
+function setupHome() {
+  $("h-scope").addEventListener("change", () => { bScope = $("h-scope").value; try { localStorage.setItem("ibmath.scope", bScope); } catch {} renderHome(); });
+  $("h-rev-go").onclick = () => startSet(SET_NAMES.due, SETS.due());
+  $("h-weak-go").onclick = () => startSet(SET_NAMES.weak, SETS.weak());
+  $("h-cont-go").onclick = () => { const q = QBYID.get(localStorage.getItem("ibmath.last")); if (!q) return;
+    const qs = paperQs(paperId(q)); startSet(paperName(paperId(q)), qs, qs.indexOf(q)); };
+  document.querySelector(".h-quick").addEventListener("click", (e) => { const b = e.target.closest("button[data-set]"); if (!b) return;
+    if (b.dataset.set === "all") { const [level, subject] = bScope.split("|"); goPractice({ level, subject }); return; } startSet(SET_NAMES[b.dataset.set], SETS[b.dataset.set]()); });
+  $("h-topics").addEventListener("click", (e) => { const b = e.target.closest(".h-tp"); if (!b) return;
+    showView("browse"); const h = document.querySelector(`#b-cards h3[data-topic="${b.dataset.topic}"]`); if (h) h.scrollIntoView({ block: "start" }); });
+  $("h-all-topics").onclick = () => showView("browse");
+  $("sess-exit").onclick = () => { exitSet(); showView("home"); };
+  $("sess-home").onclick = () => { exitSet(); showView("home"); };
+  $("sess-again").onclick = () => { const ids = Object.entries(sess.rated).filter(([, r]) => r !== "got").map(([id]) => QBYID.get(id)); startSet("Again: " + sess.name, ids); };
 }
 
 // ---------------- browse tab: topic index with counts ----------------
@@ -1381,6 +1408,7 @@ function renderBrowse() {
   }).join("");
 }
 function goPractice({ level, subject, topic, sub, marked, status }) {
+  if (sess) exitSet();
   for (const id of FILTER_IDS) $(id).value = "";
   $("f-status").value = status || "";
   $("f-qnum").value = ""; $("f-marked").checked = !!marked;
@@ -1424,12 +1452,19 @@ function setupPractice() {
   $("mark").onclick = $("mark2").onclick = toggleMark;
   $("toggle-ms").onclick = () => showMs($("ms-img").hidden);
   $("toggle-sol").onclick = toggleSolution;
+  $("toggle-fb").onclick = toggleFormulas;
+  $("fb-chips").addEventListener("click", (e) => { const b = e.target.closest("button[data-p]"); if (!b) return;
+    $("fb-chips").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); fbScroll(+b.dataset.p); });
   initVideoUI(); initRateUI();
   document.addEventListener("keydown", (e) => {
     if ($("practice").hidden || typing(e) || !$("settings").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "ArrowRight") step(1);
     else if (e.key === "ArrowLeft") step(-1);
     else if (e.key === "m" || e.key === "M") toggleMark();
+    else if ((e.key === "s" || e.key === "S") && current) showMs($("ms-img").hidden);
+    else if ((e.key === "v" || e.key === "V") && current && !$("toggle-vid").hidden) toggleVideo();
+    else if ((e.key === "f" || e.key === "F") && current) toggleFormulas();
+    else if (/^[123]$/.test(e.key) && current && !$("rate").hidden) $("rate").querySelector(`button[data-r="${["got", "partly", "missed"][+e.key - 1]}"]`).click();
   });
 }
 
@@ -1457,11 +1492,14 @@ async function init() {
   fillSelect($("f-year"), years); fillSelect($("r-year"), years);
   refreshTopicFilters();
   document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showView(b.dataset.view));
-  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher(); setupExam();
+  $("hdr-home").onclick = () => showView("home");
+  QBYID = new Map(questions.map((q) => [q.id, q]));
+  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher(); setupHome();
   showNotice(aside);
   renderList(true);
   try { bScope = localStorage.getItem("ibmath.scope") || bScope; } catch {}
-  let v = "browse"; try { v = localStorage.getItem("ibmath.view") || "browse"; } catch {}
+  let v = "home"; try { v = localStorage.getItem("ibmath.view") || "home"; } catch {}
+  if (v === "practice" && !applied && !sess) v = "home"; // an empty Practice page is no place to start
   showView(v);
 }
 init();

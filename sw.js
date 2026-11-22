@@ -1,6 +1,6 @@
 // Installable app (PWA): keeps the app shell (code and question list) so the app opens quickly and starts offline.
 // Only this site's own files are kept; sign-in, images and video scripts come from Supabase and are never stored here.
-const SHELL = "ibmath-shell-202611212330";
+const SHELL = "ibmath-shell-202611221102";
 self.addEventListener("install", (e) => { self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith("ibmath-shell-") && k !== SHELL).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", (e) => {

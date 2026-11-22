@@ -339,24 +339,127 @@ img.failed{cursor:pointer;color:#b91c1c}
 .rtag.missed{background:#dc2626}.rtag.partly{background:var(--warn);color:#111}
 @media (max-width:700px){ .t-d-grid{grid-template-columns:1fr} .t-causes .bar{grid-template-columns:120px 1fr 24px} }
 
-/* ---- timed paper ---- */
-#exam{padding:8px 20px 40px;max-width:1100px}
-#ex-info{margin:8px 0 12px}
-.ex-bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;background:var(--bg);border-bottom:1px solid var(--line)}
-.ex-bar b{margin-right:auto}
-.ex-clock{font:600 22px/1 ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;padding:4px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
-.ex-clock.low{color:var(--warn);border-color:var(--warn)}.ex-clock.over{color:#dc2626;border-color:#dc2626}
-.ex-qnav{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
-.ex-qnav button{min-width:44px;padding:4px 8px;font-size:13px}
-.ex-qnav button.on{border-color:var(--acc);color:var(--acc);font-weight:600}
-.ex-q{background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px;max-width:900px}
-.ex-q img,.ex-q .qcut{max-width:100%}
-.ex-paused{position:fixed;inset:0;z-index:40;background:rgba(15,23,42,.75);display:flex;align-items:center;justify-content:center;color:#fff;text-align:center;font-size:20px}
-.ex-paused[hidden]{display:none}
-.ex-row{border:1px solid var(--line);border-radius:10px;background:var(--card);padding:10px 12px;margin:10px 0}
-.ex-row-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.ex-row-h b{margin-right:auto}
-.ex-row label.chk{flex-direction:row;align-items:center;gap:6px;font-size:14px;color:var(--fg)}
-.ex-row input{width:70px;text-align:right}
-.ex-row img,.ex-row .qcut{display:block;max-width:min(100%,900px);margin-top:8px;background:#fff}
-.ex-total{font-size:16px;margin:14px 0}
+
+/* ---- focus layout (2026-11-22): tabs in the right pane, bottom dock with rating and Next ---- */
+.ptabs{gap:0 !important;border-bottom:1px solid var(--line);margin-bottom:10px !important}
+.ptabs button{border:0;border-radius:0;background:transparent;color:var(--mute);font-weight:600;padding:10px 16px;border-bottom:2px solid transparent;margin-bottom:-1px;min-height:42px}
+.ptabs button:hover{color:var(--fg);border-color:transparent;border-bottom-color:var(--line)}
+.ptabs button.on{color:var(--acc);border-bottom-color:var(--acc)}
+#question{padding-bottom:84px}
+#dock{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(16,24,40,.07)}
+#practice[hidden] #dock,#question[hidden] #dock{display:none}
+.dock-in{display:flex;align-items:center;gap:8px;padding:10px 20px;max-width:1500px;margin:0 auto}
+#rate{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0;padding:0;border:0;background:none}
+#rate[hidden]{display:none}
+#rate button{border:0;font-weight:600;padding:8px 14px}
+#rate button[data-r="got"]{background:#dcfce7;color:#166534}
+#rate button[data-r="partly"]{background:#fef3c7;color:#92400e}
+#rate button[data-r="missed"]{background:#fee2e2;color:#991b1b}
+#rate button.on[data-r="got"]{background:var(--ok);color:#fff}
+#rate button.on[data-r="partly"]{background:var(--warn);color:#111}
+#rate button.on[data-r="missed"]{background:#dc2626;color:#fff}
+#rate-more{padding:10px 20px 0;max-width:1500px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
+#rate-more[hidden]{display:none}
+.dock-keys{font-size:12px}
+#next2{font-weight:700;padding:9px 18px}
+#meta .last{display:inline-block;font-size:12px;padding:2px 9px;border-radius:99px;margin-left:4px}
+#meta .last.got{background:#dcfce7;color:#166534}#meta .last.partly{background:#fef3c7;color:#92400e}#meta .last.missed{background:#fee2e2;color:#991b1b}
+@media (max-width:800px){
+  .dock-in{flex-wrap:wrap;padding:8px 12px;gap:6px}
+  #rate{width:100%;display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  #rate .rate-q,#rate #rate-state{grid-column:1 / -1}
+  #rate .rate-q{display:none}
+  #rate #rate-state{font-size:12px;text-align:center;order:5}
+  .dock-in .grow,.dock-keys{display:none}
+  #mark2{flex:1;white-space:nowrap;padding:8px 6px;font-size:14px}#prev2{flex:0 0 48px}#next2{flex:2}
+  #viewer .toolbar #prev,#viewer .toolbar #next,#viewer .toolbar #mark{display:none}
+  #rate-more{padding:8px 12px 0}
+  .rate-causes{gap:6px}
+  #question{padding-bottom:150px}
+}
+
+/* ---- home (2026-11-22) ---- */
+#home{padding:0}
+.h-wrap{max-width:1120px;margin:0 auto;padding:24px 20px 50px}
+.h-hello{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.h-hello h2{font-size:26px;letter-spacing:-.02em}
+.h-course{margin-left:auto;flex-direction:row;align-items:center;gap:8px}
+.h-cards{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:14px}
+.h-card{background:var(--card);border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,.06),0 0 0 1px var(--line);display:flex;flex-direction:column;gap:8px;min-height:180px}
+.h-card .k{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.h-card .big{font-size:32px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+.h-card .t{font-weight:600;font-size:16px}.h-card .s{color:var(--mute);font-size:14px}
+.h-card button{align-self:flex-start;margin-top:auto;font-weight:600}
+.h-card.hero{background:linear-gradient(135deg,#2f5bea,#4f7bff);color:#fff;box-shadow:none}
+.h-card.hero .k,.h-card.hero .s{color:#dbe4ff}
+.h-card.hero button{background:#fff;color:#2f5bea;border:0}
+.h-dots{display:flex;gap:4px;flex-wrap:wrap}.h-dots i{width:10px;height:10px;border-radius:3px;background:rgba(255,255,255,.4)}
+.h-dots i.missed{background:#fca5a5}.h-dots i.partly{background:#fde68a}.h-dots i.got{background:#86efac}
+.h-quick{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 26px}
+.h-quick button{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 16px;font-weight:600;text-align:left}
+.h-quick button b{display:block;font-size:12px;color:var(--mute);font-weight:400}
+.h-sub{font-size:17px;margin:0 0 12px}
+.h-topics{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+.h-tp{display:flex;flex-direction:column;align-items:stretch;text-align:left;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;min-height:110px}
+.h-tp .n{font-weight:600;font-size:14px;flex:1}
+.h-tp .bar{height:8px;border-radius:4px;background:var(--bg);overflow:hidden;display:flex;border:1px solid var(--line)}
+.h-tp .bar i{display:block;height:100%}.h-tp .g{background:var(--ok)}.h-tp .y{background:#f59e0b}.h-tp .r{background:#dc2626}
+.h-tp .s{font-size:12px;color:var(--mute)}.h-tp .s.w{color:#dc2626;font-weight:600}
+/* question sets */
+#practice.in-set #filterbar{display:none}
+#sessbar{display:flex;align-items:center;gap:12px;padding:8px 0 10px;flex-wrap:wrap}
+#sessbar button{padding:5px 10px;font-size:13px}
+.sess-prog{display:flex;gap:4px;flex:1;min-width:160px;max-width:520px}
+.sess-prog i{flex:1;height:6px;border-radius:3px;background:var(--line)}
+.sess-prog i.cur{background:var(--acc)}.sess-prog i.got{background:var(--ok)}.sess-prog i.partly{background:#f59e0b}.sess-prog i.missed{background:#dc2626}
+#sess-done{padding:40px 10px;text-align:center}#sess-done .row{justify-content:center;display:flex;gap:10px;flex-wrap:wrap}
+/* header icons: only in the phone tab bar */
+nav button i{display:none;font-style:normal}
+@media (max-width:800px){
+  .h-wrap{padding:16px 14px 90px}.h-hello h2{font-size:22px}.h-course{margin-left:0;width:100%}
+  .h-cards{grid-template-columns:1fr}.h-card{min-height:0}
+  .h-topics{grid-template-columns:1fr 1fr}
+}
+/* ---- phone: tab bar at the bottom (hidden on the practice screen, which has its own bottom bar) ---- */
+#hdr-home{display:none}
+@media (max-width:800px){
+  header{justify-content:space-between}
+  header h1{display:block;font-size:17px;flex:1}
+  header nav{position:fixed;left:0;right:0;bottom:0;z-index:25;background:var(--card);border-top:1px solid var(--line);gap:0;padding:4px 4px calc(4px + env(safe-area-inset-bottom));overflow:visible}
+  header nav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;border:0;background:none;font-size:11px;padding:4px 0;min-height:48px;color:var(--mute)}
+  header nav button i{display:block;font-size:20px;line-height:1.1}
+  header nav button.active{color:var(--acc);border:0;background:none}
+  body[data-view="practice"] header nav{display:none}
+  body[data-view="practice"] #hdr-home{display:inline-block}
+  main{padding-bottom:70px}
+  body[data-view="practice"] main{padding-bottom:0}
+}
+#practice.in-set #viewer>.toolbar{display:none}
+#practice.in-set #sessbar{padding-top:14px}
+@media (max-width:800px){
+  header nav{overflow:hidden}
+  header nav button{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
+/* tag editor on a phone: long subtopic names must not widen the page */
+#review .main,#r-detail,#r-edit,#r-edit label{min-width:0;max-width:100%}
+#r-edit select{width:100%;min-width:0}
+@media (max-width:800px){ body.vid-open #dock{display:none} body.vid-open #question{padding-bottom:20px} }
+
+/* room for the dock: scrolling and "scroll into view" stop above it */
+html{scroll-padding-bottom:calc(var(--dockh,80px) + 12px)}
+#question{padding-bottom:calc(var(--dockh,80px) + 20px) !important}
+body.vid-open #question{padding-bottom:20px !important}
+@media (min-width:801px){body.vid-open #question{padding-bottom:calc(var(--dockh,80px) + 20px) !important}}
+
+.h-sub-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 12px}
+.h-sub-row .h-sub{margin:0}
+button.linkish{border:0;background:none;color:var(--acc);font-weight:600;padding:4px 0;min-height:0}
+
+/* ---- formula booklet tab ---- */
+.fb-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.fb-chips button{font-size:12px;padding:4px 10px;min-height:0;border-radius:99px}
+.fb-chips button.on{border-color:var(--acc);color:var(--acc);font-weight:600}
+.fb-pages{max-height:calc(100vh - 240px);overflow:auto;overscroll-behavior:contain;border:1px solid var(--line);border-radius:8px;background:#fff}
+.fb-pages img{display:block;width:100%;border-bottom:1px solid var(--line)}
+@media (max-width:800px){.fb-pages{max-height:70vh}}
+.fb-pages img{aspect-ratio:1100 / 1556;height:auto} /* fixed page shape: the jump to a topic is right before the pages load */
