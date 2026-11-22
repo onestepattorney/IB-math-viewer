@@ -383,28 +383,22 @@ img.failed{cursor:pointer;color:#b91c1c}
 .h-wrap{max-width:1120px;margin:0 auto;padding:24px 20px 50px}
 .h-hello{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:18px}
 .h-hello h2{font-size:26px;letter-spacing:-.02em}
-.h-course{margin-left:auto;flex-direction:row;align-items:center;gap:8px}
-.h-cards{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:14px}
-.h-card{background:var(--card);border-radius:16px;padding:18px;box-shadow:0 1px 2px rgba(16,24,40,.06),0 0 0 1px var(--line);display:flex;flex-direction:column;gap:8px;min-height:180px}
-.h-card .k{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
-.h-card .big{font-size:32px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
-.h-card .t{font-weight:600;font-size:16px}.h-card .s{color:var(--mute);font-size:14px}
-.h-card button{align-self:flex-start;margin-top:auto;font-weight:600}
-.h-card.hero{background:linear-gradient(135deg,#2f5bea,#4f7bff);color:#fff;box-shadow:none}
-.h-card.hero .k,.h-card.hero .s{color:#dbe4ff}
-.h-card.hero button{background:#fff;color:#2f5bea;border:0}
-.h-dots{display:flex;gap:4px;flex-wrap:wrap}.h-dots i{width:10px;height:10px;border-radius:3px;background:rgba(255,255,255,.4)}
-.h-dots i.missed{background:#fca5a5}.h-dots i.partly{background:#fde68a}.h-dots i.got{background:#86efac}
-.h-quick{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 26px}
-.h-quick button{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 16px;font-weight:600;text-align:left}
-.h-quick button b{display:block;font-size:12px;color:var(--mute);font-weight:400}
-.h-sub{font-size:17px;margin:0 0 12px}
-.h-topics{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
-.h-tp{display:flex;flex-direction:column;align-items:stretch;text-align:left;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;min-height:110px}
-.h-tp .n{font-weight:600;font-size:14px;flex:1}
-.h-tp .bar{height:8px;border-radius:4px;background:var(--bg);overflow:hidden;display:flex;border:1px solid var(--line)}
-.h-tp .bar i{display:block;height:100%}.h-tp .g{background:var(--ok)}.h-tp .y{background:#f59e0b}.h-tp .r{background:#dc2626}
-.h-tp .s{font-size:12px;color:var(--mute)}.h-tp .s.w{color:#dc2626;font-weight:600}
+.h-course{flex-direction:row;align-items:center;gap:8px}
+.today{background:var(--card);border-radius:18px;padding:22px;box-shadow:0 1px 2px rgba(16,24,40,.06),0 0 0 1px var(--line);max-width:720px}
+.today-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.today .k{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.today-sub{font-size:15px;margin-top:2px}
+.today-time{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:3px;margin:16px 0 4px}
+.today-time button{border:0;background:none;border-radius:9px;padding:8px 18px;font-weight:600;color:var(--mute);min-height:0}
+.today-time button.on{background:var(--card);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.today-plan ul{list-style:none;margin:14px 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.today-plan li{display:flex;align-items:baseline;gap:10px;font-size:15px}
+.today-plan li b{display:inline-grid;place-items:center;min-width:28px;height:28px;border-radius:8px;font-size:14px}
+.today-plan li.rv b{background:#fee2e2;color:#991b1b}.today-plan li.wk b{background:#fef3c7;color:#92400e}.today-plan li.nw b{background:#e0e7ff;color:#3730a3}
+.today-go{font-size:17px;padding:12px 34px;border-radius:12px;margin-top:6px}
+.h-cont{display:flex;align-items:center;gap:12px;flex-wrap:wrap;max-width:720px;margin-top:14px;padding:12px 16px;border:1px dashed var(--line);border-radius:12px;color:var(--mute)}
+.h-cont[hidden]{display:none}
+.h-cont button{margin-left:auto}
 /* question sets */
 #practice.in-set #filterbar{display:none}
 #sessbar{display:flex;align-items:center;gap:12px;padding:8px 0 10px;flex-wrap:wrap}
@@ -417,8 +411,7 @@ img.failed{cursor:pointer;color:#b91c1c}
 nav button i{display:none;font-style:normal}
 @media (max-width:800px){
   .h-wrap{padding:16px 14px 90px}.h-hello h2{font-size:22px}.h-course{margin-left:0;width:100%}
-  .h-cards{grid-template-columns:1fr}.h-card{min-height:0}
-  .h-topics{grid-template-columns:1fr 1fr}
+  .today{padding:18px}.today-time{display:flex}.today-time button{flex:1}.today-go{width:100%}
 }
 /* ---- phone: tab bar at the bottom (hidden on the practice screen, which has its own bottom bar) ---- */
 #hdr-home{display:none}
@@ -451,8 +444,6 @@ html{scroll-padding-bottom:calc(var(--dockh,80px) + 12px)}
 body.vid-open #question{padding-bottom:20px !important}
 @media (min-width:801px){body.vid-open #question{padding-bottom:calc(var(--dockh,80px) + 20px) !important}}
 
-.h-sub-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 12px}
-.h-sub-row .h-sub{margin:0}
 button.linkish{border:0;background:none;color:var(--acc);font-weight:600;padding:4px 0;min-height:0}
 
 /* ---- formula booklet tab ---- */

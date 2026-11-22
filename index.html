@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css?v=202611221102">
+<link rel="stylesheet" href="style.css?v=202611222146">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#2f5bea">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -76,11 +76,11 @@
   <button id="hdr-home" class="icon-btn" aria-label="Home" title="Home">&#8962;</button>
   <h1>IB Math Practice</h1>
   <nav>
-    <button data-view="home" class="active"><i aria-hidden="true">&#8962;</i>Home</button>
+    <button data-view="home" class="active"><i aria-hidden="true">&#8962;</i>Today</button>
     <button data-view="practice"><i aria-hidden="true">&#9998;</i>Practice</button>
     <button data-view="browse"><i aria-hidden="true">&#9776;</i>Topics</button>
     <button data-view="review" id="nav-review" hidden>Tag editor</button>
-    <button data-view="teacher" id="nav-teacher" hidden>Students</button>
+    <button data-view="teacher" id="nav-teacher" hidden><i aria-hidden="true">&#9786;</i>Students</button>
   </nav>
   <button id="open-settings" class="icon-btn" aria-label="Settings" title="Settings">&#9881;</button>
 </header>
@@ -89,21 +89,19 @@
 
 <main id="home">
   <div class="h-wrap">
-    <div class="h-hello"><h2 id="h-hello">IB Math Practice</h2><span id="h-week" class="muted"></span>
-      <label class="h-course">My course<select id="h-scope"><option value="HL|AA">HL Analysis &amp; Approaches</option><option value="SL|AA">SL Analysis &amp; Approaches</option><option value="HL|AI">HL Applications &amp; Interpretation</option><option value="SL|AI">SL Applications &amp; Interpretation</option></select></label></div>
-    <div class="h-cards">
-      <div class="h-card hero" id="h-review"><div class="k">Review today</div><div class="big" id="h-rev-n"></div><div class="h-dots" id="h-rev-dots"></div><div class="s" id="h-rev-s"></div><button id="h-rev-go">Start review</button></div>
-      <div class="h-card" id="h-weak"><div class="k">Weakest subtopic</div><div class="t" id="h-weak-t"></div><div class="s" id="h-weak-s"></div><button class="primary" id="h-weak-go">Practise 5 questions</button></div>
-      <div class="h-card" id="h-cont"><div class="k">Continue</div><div class="t" id="h-cont-t"></div><div class="s" id="h-cont-s"></div><button id="h-cont-go">Resume</button></div>
-    </div>
-    <div class="h-quick">
-      <button data-set="quick">Quick 10<b>mixed, from my weaker topics</b></button>
-      <button data-set="new">New questions<b>10 I have not tried</b></button>
-      <button data-set="hard">Hard with a video<b>10 questions</b></button>
-      <button data-set="all">All questions<b id="h-all-s">every question, with filters</b></button>
-    </div>
-    <div class="h-sub-row"><h3 class="h-sub" id="h-topics-h">My topics</h3><button id="h-all-topics" class="linkish">All subtopics &rarr;</button></div>
-    <div class="h-topics" id="h-topics"></div>
+    <div class="h-hello"><h2 id="h-hello">IB Math Practice</h2><span id="h-week" class="muted"></span></div>
+    <section class="today" id="today">
+      <div class="today-top">
+        <div><div class="k">Today's practice</div><div class="today-sub muted" id="t-course-line"></div></div>
+        <label class="h-course">Course<select id="h-scope"><option value="HL|AA">HL Analysis &amp; Approaches</option><option value="SL|AA">SL Analysis &amp; Approaches</option><option value="HL|AI">HL Applications &amp; Interpretation</option><option value="SL|AI">SL Applications &amp; Interpretation</option></select></label>
+      </div>
+      <div class="today-time" id="today-time" role="group" aria-label="Time">
+        <button data-min="15">15 min</button><button data-min="30">30 min</button><button data-min="60">60 min</button>
+      </div>
+      <div class="today-plan" id="today-plan"></div>
+      <button class="primary today-go" id="today-go">Start</button>
+    </section>
+    <div class="h-cont" id="h-cont" hidden><span id="h-cont-t"></span><button id="h-cont-go">Continue</button></div>
   </div>
 </main>
 
@@ -143,6 +141,8 @@
         <select id="f-subtopic"><option value="">All</option></select></label>
       <label>Paper
         <select id="f-paper"><option value="">All</option><option value="1">Paper 1</option><option value="2">Paper 2</option><option value="3">Paper 3</option></select></label>
+      <label>Video
+        <select id="f-video"><option value="">All</option><option value="1">With a video</option></select></label>
       <label>Difficulty
         <select id="f-diff"><option value="">All</option><option value="1">Easy</option><option value="2">Medium</option><option value="3">Hard</option></select></label>
       <label>Year
@@ -192,7 +192,7 @@
               <button id="toggle-sol" role="tab" hidden>My solution</button>
               <button id="toggle-fb" role="tab">Formulas</button>
             </h3>
-            <div id="ms-cover">Try the question first, then open the <b>Markscheme</b> or the <b>Video</b>.</div>
+            <div id="ms-cover">Try the question first, then open the <b>Markscheme</b>.</div>
             <img id="ms-img" alt="Markscheme" hidden>
             <div id="vid-panel" hidden>
               <div id="vid-part" class="muted"></div>
@@ -337,10 +337,10 @@
   </section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" crossorigin="anonymous"></script>
-<script src="data/config.js?v=202611221102"></script>
+<script src="data/config.js?v=202611222146"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-<script src="data/data.js?v=202611221102"></script>
-<script src="app.js?v=202611221102"></script>
+<script src="data/data.js?v=202611222146"></script>
+<script src="app.js?v=202611222146"></script>
 </body>
 </html>

@@ -241,7 +241,7 @@ document.addEventListener("pointerdown", (e) => { // tap outside the open list b
 for (const ev of ["scroll", "resize"]) window.addEventListener(ev, () => document.querySelectorAll(".split.list-open").forEach(placePanel), { passive: true });
 
 // ---------------- practice: filters ----------------
-const FILTER_IDS = ["f-subject", "f-level", "f-topic", "f-subtopic", "f-paper", "f-diff", "f-year", "f-month", "f-tz", "f-status"];
+const FILTER_IDS = ["f-subject", "f-level", "f-topic", "f-subtopic", "f-paper", "f-video", "f-diff", "f-year", "f-month", "f-tz", "f-status"];
 
 function refreshTopicFilters() {
   // Topic ids/names are shared by AA and AI; subtopics depend on the course.
@@ -257,20 +257,20 @@ function refreshSubtopics() {
 
 // The controls only edit a draft. The list is built from `applied`, which changes only when "Show questions" is pressed,
 // so the list on screen always matches the filters it says it was built from.
-const EMPTY_F = { level: "", subject: "", paper: "", topic: "", sub: "", diff: 0, year: "", month: "", tz: "", qnum: "", marked: false, status: "" };
+const EMPTY_F = { level: "", subject: "", paper: "", topic: "", sub: "", diff: 0, year: "", month: "", tz: "", qnum: "", marked: false, status: "", video: "" };
 let applied = null, appliedText = "";  // null until the first "Show questions"
 const readDraft = () => ({
   level: $("f-level").value, subject: $("f-subject").value, paper: $("f-paper").value,
   topic: $("f-topic").value, sub: $("f-subtopic").value, diff: +$("f-diff").value,
   year: $("f-year").value, month: $("f-month").value, tz: $("f-tz").value, qnum: $("f-qnum").value,
-  marked: $("f-marked").checked, status: $("f-status").value,
+  marked: $("f-marked").checked, status: $("f-status").value, video: $("f-video").value,
 });
 const matcher = (f) => (q) =>
   (!f.level || q.level === f.level) && (!f.subject || q.subject === f.subject) &&
   (!f.paper || String(q.paper) === f.paper) && (!f.year || String(q.year) === f.year) &&
   (!f.month || q.month === f.month) && (!f.tz || q.tz === f.tz) && (!f.qnum || String(q.q) === f.qnum) &&
   (!f.topic || q.topic === f.topic) && (!f.sub || q.subtopic_name === f.sub) &&
-  (!f.diff || tier(q.difficulty) === f.diff) && (!f.marked || isMarked(q)) && (!f.status || statusIs(q, f.status));
+  (!f.diff || tier(q.difficulty) === f.diff) && (!f.marked || isMarked(q)) && (!f.status || statusIs(q, f.status)) && (!f.video || vHas(q));
 const filtered = () => (sess ? sess.ids.map((id) => QBYID.get(id)).filter(Boolean) : applied ? questions.filter(matcher(applied)) : []);
 function draftText() {
   const parts = FILTER_IDS.filter((id) => $(id).value).map((id) => $(id).selectedOptions[0].text);
@@ -486,7 +486,7 @@ function initRateUI() {
       const r = rb.dataset.r, prev = qstate[q.id] || {};
       const res = await saveState(q.id, { rating: r, ...schedule(prev, r), cause: r === "got" ? null : prev.cause, updated_at: new Date().toISOString() });
       if (!res.error) SB.from("attempts").insert({ user_id: me.id, qid: q.id, rating: r }).then(() => {}, () => {});
-      if (sess && sess.ids.includes(q.id)) { sess.rated[q.id] = r; renderSess(); }
+      if (sess && sess.ids.includes(q.id)) { sess.rated[q.id] = r; renderSess(); sessSave(); }
       if (current === q) { setupRate(q, true); if (res.error) $("rate-state").textContent = "Couldn't save: " + res.error.message; }
       renderList(); return;
     }
@@ -1294,13 +1294,15 @@ const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) {
 const coursePool = () => { const [level, subject] = bScope.split("|"); return questions.filter((q) => q.level === level && q.subject === subject); };
 function startSet(name, qs, at = 0) {
   if (!qs.length) { alert("No questions for this set yet."); return; }
-  sess = { name, ids: qs.map((q) => q.id), rated: {} };
+  sess = { name, ids: qs.map((q) => q.id), rated: {}, day: today() }; sessSave();
   applied = { ...EMPTY_F }; appliedText = name;
   $("practice").classList.add("in-set"); $("sessbar").hidden = false; $("sess-name").textContent = name;
   showView("practice"); renderList(true);
   if (!isNarrow()) $("p-body").classList.add("collapsed");
   openQuestion(qs[Math.min(at, qs.length - 1)]);
 }
+const SKEY2 = "ibmath.set"; // the set in progress, so Today can offer "Continue"
+function sessSave() { lsSet(SKEY2, sess || {}); }
 function exitSet() { sess = null; $("practice").classList.remove("in-set"); $("sessbar").hidden = true; $("sess-done").hidden = true; clearAll(); }
 function renderSess() {
   if (!sess) return;
@@ -1311,23 +1313,32 @@ function renderSess() {
 function finishSet() {
   const r = Object.values(sess.rated), n = (k) => r.filter((x) => x === k).length;
   clearViewer(); $("empty").hidden = true; $("sess-done").hidden = false;
+  lsSet(SKEY2, {}); // finished: nothing to continue
   $("sess-sum").textContent = `${sess.ids.length} questions · ${n("got")} got it · ${n("partly")} partly · ${n("missed")} missed` + (r.length < sess.ids.length ? ` · ${sess.ids.length - r.length} not rated` : "");
   $("sess-again").hidden = !(n("missed") + n("partly"));
   window.scrollTo(0, 0);
 }
-const SETS = {
-  due: () => shuffle(questions.filter((q) => isDue(qstate[q.id]))),
-  weak: () => { const w = weakest(coursePool()); if (!w) return [];
-    const qs = coursePool().filter((q) => q.topic === w.t && q.subtopic === w.s.id), rank = (q) => { const st = qstate[q.id]; return !st || !st.rating ? 1 : st.rating === "got" ? 2 : 0; };
-    return shuffle(qs).sort((a, b) => rank(a) - rank(b)).slice(0, 5); },
-  quick: () => { const pool = coursePool(), weakSubs = new Set();
-    for (const q of pool) { const k = q.topic + "|" + q.subtopic; if (!weakSubs.has(k) && isWeak(tally(pool.filter((x) => x.topic === q.topic && x.subtopic === q.subtopic)))) weakSubs.add(k); }
-    const score = (q) => { const st = qstate[q.id] || {}; return (st.rating === "missed" ? 3 : st.rating === "partly" ? 2 : !st.rating ? 1.5 : 0) + (weakSubs.has(q.topic + "|" + q.subtopic) ? 2 : 0) + Math.random() * 2; };
-    return shuffle(pool.map((q) => [score(q), q]).sort((a, b) => b[0] - a[0]).slice(0, 10).map((x) => x[1])); },
-  new: () => shuffle(coursePool().filter((q) => !(qstate[q.id] && qstate[q.id].rating))).slice(0, 10),
-  hard: () => shuffle(coursePool().filter((q) => tier(q.difficulty) === 3 && vHas(q))).slice(0, 10),
-};
-const SET_NAMES = { due: "Review", weak: "Weakest subtopic", quick: "Quick 10", new: "New questions", hard: "Hard with a video" };
+// Today's practice: one set sized to the time chosen, built from the study record (the same for students and teachers).
+// Order: questions due for review (missed first), then the weakest subtopic, then questions not tried yet.
+// About 1.1 minutes per mark (IB papers: 80 marks in 90 minutes). The same day, course and time give the same set.
+const MIN_PER_MARK = 1.1;
+function seeded(seed) { let h = 2166136261 >>> 0; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return () => { h ^= h << 13; h >>>= 0; h ^= h >>> 17; h ^= h << 5; h >>>= 0; return h / 4294967296; }; }
+const shuffleR = (a, rnd) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+function buildToday(min) {
+  const rnd = seeded(`${today()}|${bScope}|${min}|${me.email || ""}`), pool = coursePool(), budget = min / MIN_PER_MARK;
+  const st = (q) => qstate[q.id] || {}, rk = (q) => (st(q).rating === "missed" ? 0 : st(q).rating === "partly" ? 1 : 2);
+  const due = shuffleR(pool.filter((q) => isDue(qstate[q.id])), rnd).sort((a, b) => rk(a) - rk(b));
+  const w = SBMODE ? weakest(pool) : null;
+  const weakQs = w ? shuffleR(pool.filter((q) => q.topic === w.t && q.subtopic === w.s.id && !isDue(qstate[q.id]) && st(q).rating !== "got"), rnd) : [];
+  const fresh = shuffleR(pool.filter((q) => !st(q).rating), rnd);
+  const out = [], parts = { review: 0, weak: 0, new: 0 }; let used = 0;
+  const take = (list, key, cap) => { for (const q of list) { if (used >= cap) break; if (out.includes(q)) continue;
+      if (out.length && used + q.marks > budget * 1.15) continue; out.push(q); used += q.marks; parts[key]++; } };
+  take(due, "review", budget * 0.5); take(weakQs, "weak", budget * 0.8); take(fresh, "new", budget); take(due, "review", budget);
+  return { qs: out, parts, marks: used, weak: w };
+}
+let todayMin = 30; try { todayMin = +localStorage.getItem("ibmath.min") || 30; } catch {}
 function renderHome() {
   $("h-scope").value = bScope;
   const hr = new Date().getHours(), first = (me.name || "").split(" ")[0];
@@ -1335,48 +1346,28 @@ function renderHome() {
   const week = Date.now() - 7 * 864e5, recent = Object.values(qstate).filter((x) => x.rating && x.updated_at && Date.parse(x.updated_at) > week);
   const days = new Set(recent.map((x) => x.updated_at.slice(0, 10))).size;
   $("h-week").textContent = SBMODE ? `This week: ${recent.length} question${recent.length === 1 ? "" : "s"} · ${days} day${days === 1 ? "" : "s"}` : "";
-  // review today
-  const due = questions.filter((q) => isDue(qstate[q.id])), dn = (k) => due.filter((q) => qstate[q.id].rating === k).length;
-  $("h-rev-n").textContent = due.length ? `${due.length} question${due.length === 1 ? "" : "s"}` : "All caught up";
-  $("h-rev-dots").innerHTML = due.slice(0, 24).map((q) => `<i class="${qstate[q.id].rating}"></i>`).join("");
-  $("h-rev-s").textContent = due.length ? `${dn("missed")} missed · ${dn("partly")} partly · ${dn("got")} to check again, about ${Math.max(5, Math.round(due.reduce((a, q) => a + q.marks, 0) * 1.1 / 5) * 5)} minutes`
-    : SBMODE ? "Nothing to review today. Rate questions as you practise and they come back here on the right day." : "Sign in to keep a study record.";
-  $("h-rev-go").hidden = !due.length;
-  // weakest subtopic
-  const w = SBMODE ? weakest(coursePool()) : null;
-  $("h-weak-t").textContent = w ? `${w.s.id} ${w.s.name}` : "Not known yet";
-  $("h-weak-s").textContent = w ? `${w.r.missed + w.r.partly} of ${w.r.tried} not right yet` : "Rate a few questions and your weakest subtopic shows up here.";
-  $("h-weak-go").hidden = !w;
-  // continue
-  let last = null; try { last = QBYID.get(localStorage.getItem("ibmath.last")); } catch {}
-  $("h-cont").hidden = !last;
-  if (last) { $("h-cont-t").textContent = `${label(last)}`; $("h-cont-s").textContent = `${last.subtopic_name || ""}${last.difficulty ? " · " + TIER_NAMES[tier(last.difficulty)] : ""}`; }
-  // topics of my course
-  const [level, subject] = bScope.split("|"), pool = coursePool();
-  $("h-topics-h").textContent = `My topics · ${$("h-scope").selectedOptions[0].text}`;
-  $("h-all-s").textContent = `all ${pool.length} in ${level} ${subject}, with filters`;
-  $("h-topics").innerHTML = topics[subject].map((t) => {
-    const tq = pool.filter((q) => q.topic === t.id), r = tally(tq), n = tq.length || 1;
-    const weakS = t.subtopics.filter((s) => (level === "HL" || !s.hl_only) && isWeak(tally(tq.filter((q) => q.subtopic === s.id)))).map((s) => s.id);
-    const got = r.tried - r.missed - r.partly;
-    return `<button class="h-tp" data-topic="${t.id}"><span class="n">${t.id}. ${esc(t.name)}</span>` +
-      `<span class="bar"><i class="g" style="width:${100 * got / n}%"></i><i class="y" style="width:${100 * r.partly / n}%"></i><i class="r" style="width:${100 * r.missed / n}%"></i></span>` +
-      `<span class="s ${weakS.length ? "w" : ""}">${weakS.length ? "Needs work · " + weakS.slice(0, 2).join(", ") : SBMODE ? `${r.tried} of ${tq.length} tried` : `${tq.length} questions`}</span></button>`;
-  }).join("");
+  document.querySelectorAll("#today-time button").forEach((b) => b.classList.toggle("on", +b.dataset.min === todayMin));
+  const plan = buildToday(todayMin), P = plan.parts, n = plan.qs.length;
+  $("t-course-line").textContent = `${n} question${n === 1 ? "" : "s"} · about ${Math.max(5, Math.round(plan.marks * MIN_PER_MARK / 5) * 5)} minutes`;
+  const row = (cls, num, text) => num ? `<li class="${cls}"><b>${num}</b> ${text}</li>` : "";
+  $("today-plan").innerHTML = n ? `<ul>${row("rv", P.review, `to review: you missed or half-got ${P.review === 1 ? "it" : "them"} before`)}` +
+      `${row("wk", P.weak, plan.weak ? `from your weakest subtopic: ${esc(plan.weak.s.id + " " + plan.weak.s.name)}` : "")}` +
+      `${row("nw", P.new, `new: not tried yet`)}</ul>` +
+      (SBMODE && !P.review && !P.weak ? `<p class="muted">Rate each question (Got it / Partly / Missed) and tomorrow's set brings back the ones that need another try.</p>` : "")
+    : `<p class="muted">No questions left for this course.</p>`;
+  $("today-go").disabled = !n;
+  // a set left half-way today
+  const sv = lsGet(SKEY2), left = sv.ids ? sv.ids.filter((id) => !(sv.rated || {})[id]).length : 0;
+  $("h-cont").hidden = !(sv.ids && sv.day === today() && left && left < sv.ids.length);
+  if (!$("h-cont").hidden) $("h-cont-t").textContent = `${sv.name}: ${left} of ${sv.ids.length} questions left`;
 }
-// the page keeps room below the content for the bottom dock, whatever its height (it grows when the reasons open)
-if (window.ResizeObserver) new ResizeObserver((es) => { for (const e of es) document.documentElement.style.setProperty("--dockh", Math.ceil(e.contentRect.height) + "px"); }).observe(document.getElementById("dock"));
 function setupHome() {
   $("h-scope").addEventListener("change", () => { bScope = $("h-scope").value; try { localStorage.setItem("ibmath.scope", bScope); } catch {} renderHome(); });
-  $("h-rev-go").onclick = () => startSet(SET_NAMES.due, SETS.due());
-  $("h-weak-go").onclick = () => startSet(SET_NAMES.weak, SETS.weak());
-  $("h-cont-go").onclick = () => { const q = QBYID.get(localStorage.getItem("ibmath.last")); if (!q) return;
-    const qs = paperQs(paperId(q)); startSet(paperName(paperId(q)), qs, qs.indexOf(q)); };
-  document.querySelector(".h-quick").addEventListener("click", (e) => { const b = e.target.closest("button[data-set]"); if (!b) return;
-    if (b.dataset.set === "all") { const [level, subject] = bScope.split("|"); goPractice({ level, subject }); return; } startSet(SET_NAMES[b.dataset.set], SETS[b.dataset.set]()); });
-  $("h-topics").addEventListener("click", (e) => { const b = e.target.closest(".h-tp"); if (!b) return;
-    showView("browse"); const h = document.querySelector(`#b-cards h3[data-topic="${b.dataset.topic}"]`); if (h) h.scrollIntoView({ block: "start" }); });
-  $("h-all-topics").onclick = () => showView("browse");
+  $("today-time").addEventListener("click", (e) => { const b = e.target.closest("button[data-min]"); if (!b) return;
+    todayMin = +b.dataset.min; try { localStorage.setItem("ibmath.min", todayMin); } catch {} renderHome(); });
+  $("today-go").onclick = () => startSet("Today", buildToday(todayMin).qs);
+  $("h-cont-go").onclick = () => { const sv = lsGet(SKEY2); const qs = (sv.ids || []).map((id) => QBYID.get(id)).filter(Boolean); if (!qs.length) return;
+    const at = qs.findIndex((q) => !(sv.rated || {})[q.id]); startSet(sv.name, qs, Math.max(0, at)); sess.rated = sv.rated || {}; sessSave(); renderSess(); };
   $("sess-exit").onclick = () => { exitSet(); showView("home"); };
   $("sess-home").onclick = () => { exitSet(); showView("home"); };
   $("sess-again").onclick = () => { const ids = Object.entries(sess.rated).filter(([, r]) => r !== "got").map(([id]) => QBYID.get(id)); startSet("Again: " + sess.name, ids); };
