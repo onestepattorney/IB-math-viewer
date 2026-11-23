@@ -486,7 +486,7 @@ function initRateUI() {
       const r = rb.dataset.r, prev = qstate[q.id] || {};
       const res = await saveState(q.id, { rating: r, ...schedule(prev, r), cause: r === "got" ? null : prev.cause, updated_at: new Date().toISOString() });
       if (!res.error) SB.from("attempts").insert({ user_id: me.id, qid: q.id, rating: r }).then(() => {}, () => {});
-      if (sess && sess.ids.includes(q.id)) { sess.rated[q.id] = r; renderSess(); sessSave(); }
+      if (sess && sess.ids.includes(q.id)) { sess.rated[q.id] = r; renderSess(); }
       if (current === q) { setupRate(q, true); if (res.error) $("rate-state").textContent = "Couldn't save: " + res.error.message; }
       renderList(); return;
     }
@@ -1178,10 +1178,10 @@ function setupSettings() {
   $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
 }
 
-const VIEWS = ["home", "browse", "practice", "review", "teacher"];
+const VIEWS = ["browse", "practice", "review", "teacher"];
 const canEditTags = () => !SBMODE || me.teacher; // sign-in mode: the Tag editor is for teachers only
 function showView(v) {
-  if (!VIEWS.includes(v) || (v === "review" && !canEditTags()) || (v === "teacher" && !me.teacher)) v = "home";
+  if (!VIEWS.includes(v) || (v === "review" && !canEditTags()) || (v === "teacher" && !me.teacher)) v = "browse";
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.view === v));
   document.body.dataset.view = v;
   for (const id of VIEWS) $(id).hidden = id !== v;
@@ -1189,7 +1189,6 @@ function showView(v) {
   try { localStorage.setItem("ibmath.view", v); } catch {}
   if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) openList($("review"), true); }
   if (v === "browse") renderBrowse();
-  if (v === "home") renderHome();
   if (v === "teacher") renderTeacher();
   window.scrollTo(0, 0);
 }
@@ -1285,7 +1284,7 @@ async function showStudent(email) {
   box.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
-// ---------------- home: what to do today; question sets ----------------
+// ---------------- question sets (Review today on Topics): progress bar, Exit, end summary ----------------
 const paperId = (q) => q.id.replace(/-Q\d+$/, "");
 const paperQs = (pid) => questions.filter((q) => paperId(q) === pid).sort((a, b) => a.q - b.q);
 const paperName = (pid) => { const q = paperQs(pid)[0]; return q ? `${q.year} ${q.month} ${q.level} ${q.subject} Paper ${q.paper}${q.tz && q.tz !== "TZ0" ? " " + q.tz : ""}` : pid; };
@@ -1294,15 +1293,13 @@ const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) {
 const coursePool = () => { const [level, subject] = bScope.split("|"); return questions.filter((q) => q.level === level && q.subject === subject); };
 function startSet(name, qs, at = 0) {
   if (!qs.length) { alert("No questions for this set yet."); return; }
-  sess = { name, ids: qs.map((q) => q.id), rated: {}, day: today() }; sessSave();
+  sess = { name, ids: qs.map((q) => q.id), rated: {} };
   applied = { ...EMPTY_F }; appliedText = name;
   $("practice").classList.add("in-set"); $("sessbar").hidden = false; $("sess-name").textContent = name;
   showView("practice"); renderList(true);
   if (!isNarrow()) $("p-body").classList.add("collapsed");
   openQuestion(qs[Math.min(at, qs.length - 1)]);
 }
-const SKEY2 = "ibmath.set"; // the set in progress, so Today can offer "Continue"
-function sessSave() { lsSet(SKEY2, sess || {}); }
 function exitSet() { sess = null; $("practice").classList.remove("in-set"); $("sessbar").hidden = true; $("sess-done").hidden = true; clearAll(); }
 function renderSess() {
   if (!sess) return;
@@ -1313,63 +1310,13 @@ function renderSess() {
 function finishSet() {
   const r = Object.values(sess.rated), n = (k) => r.filter((x) => x === k).length;
   clearViewer(); $("empty").hidden = true; $("sess-done").hidden = false;
-  lsSet(SKEY2, {}); // finished: nothing to continue
   $("sess-sum").textContent = `${sess.ids.length} questions · ${n("got")} got it · ${n("partly")} partly · ${n("missed")} missed` + (r.length < sess.ids.length ? ` · ${sess.ids.length - r.length} not rated` : "");
   $("sess-again").hidden = !(n("missed") + n("partly"));
   window.scrollTo(0, 0);
 }
-// Today's practice: one set sized to the time chosen, built from the study record (the same for students and teachers).
-// Order: questions due for review (missed first), then the weakest subtopic, then questions not tried yet.
-// About 1.1 minutes per mark (IB papers: 80 marks in 90 minutes). The same day, course and time give the same set.
-const MIN_PER_MARK = 1.1;
-function seeded(seed) { let h = 2166136261 >>> 0; for (const c of seed) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
-  return () => { h ^= h << 13; h >>>= 0; h ^= h >>> 17; h ^= h << 5; h >>>= 0; return h / 4294967296; }; }
-const shuffleR = (a, rnd) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-function buildToday(min) {
-  const rnd = seeded(`${today()}|${bScope}|${min}|${me.email || ""}`), pool = coursePool(), budget = min / MIN_PER_MARK;
-  const st = (q) => qstate[q.id] || {}, rk = (q) => (st(q).rating === "missed" ? 0 : st(q).rating === "partly" ? 1 : 2);
-  const due = shuffleR(pool.filter((q) => isDue(qstate[q.id])), rnd).sort((a, b) => rk(a) - rk(b));
-  const w = SBMODE ? weakest(pool) : null;
-  const weakQs = w ? shuffleR(pool.filter((q) => q.topic === w.t && q.subtopic === w.s.id && !isDue(qstate[q.id]) && st(q).rating !== "got"), rnd) : [];
-  const fresh = shuffleR(pool.filter((q) => !st(q).rating), rnd);
-  const out = [], parts = { review: 0, weak: 0, new: 0 }; let used = 0;
-  const take = (list, key, cap) => { for (const q of list) { if (used >= cap) break; if (out.includes(q)) continue;
-      if (out.length && used + q.marks > budget * 1.15) continue; out.push(q); used += q.marks; parts[key]++; } };
-  take(due, "review", budget * 0.5); take(weakQs, "weak", budget * 0.8); take(fresh, "new", budget); take(due, "review", budget);
-  return { qs: out, parts, marks: used, weak: w };
-}
-let todayMin = 30; try { todayMin = +localStorage.getItem("ibmath.min") || 30; } catch {}
-function renderHome() {
-  $("h-scope").value = bScope;
-  const hr = new Date().getHours(), first = (me.name || "").split(" ")[0];
-  $("h-hello").textContent = SBMODE && first ? `Good ${hr < 12 ? "morning" : hr < 18 ? "afternoon" : "evening"}, ${first}` : "IB Math Practice";
-  const week = Date.now() - 7 * 864e5, recent = Object.values(qstate).filter((x) => x.rating && x.updated_at && Date.parse(x.updated_at) > week);
-  const days = new Set(recent.map((x) => x.updated_at.slice(0, 10))).size;
-  $("h-week").textContent = SBMODE ? `This week: ${recent.length} question${recent.length === 1 ? "" : "s"} · ${days} day${days === 1 ? "" : "s"}` : "";
-  document.querySelectorAll("#today-time button").forEach((b) => b.classList.toggle("on", +b.dataset.min === todayMin));
-  const plan = buildToday(todayMin), P = plan.parts, n = plan.qs.length;
-  $("t-course-line").textContent = `${n} question${n === 1 ? "" : "s"} · about ${Math.max(5, Math.round(plan.marks * MIN_PER_MARK / 5) * 5)} minutes`;
-  const row = (cls, num, text) => num ? `<li class="${cls}"><b>${num}</b> ${text}</li>` : "";
-  $("today-plan").innerHTML = n ? `<ul>${row("rv", P.review, `to review: you missed or half-got ${P.review === 1 ? "it" : "them"} before`)}` +
-      `${row("wk", P.weak, plan.weak ? `from your weakest subtopic: ${esc(plan.weak.s.id + " " + plan.weak.s.name)}` : "")}` +
-      `${row("nw", P.new, `new: not tried yet`)}</ul>` +
-      (SBMODE && !P.review && !P.weak ? `<p class="muted">Rate each question (Got it / Partly / Missed) and tomorrow's set brings back the ones that need another try.</p>` : "")
-    : `<p class="muted">No questions left for this course.</p>`;
-  $("today-go").disabled = !n;
-  // a set left half-way today
-  const sv = lsGet(SKEY2), left = sv.ids ? sv.ids.filter((id) => !(sv.rated || {})[id]).length : 0;
-  $("h-cont").hidden = !(sv.ids && sv.day === today() && left && left < sv.ids.length);
-  if (!$("h-cont").hidden) $("h-cont-t").textContent = `${sv.name}: ${left} of ${sv.ids.length} questions left`;
-}
-function setupHome() {
-  $("h-scope").addEventListener("change", () => { bScope = $("h-scope").value; try { localStorage.setItem("ibmath.scope", bScope); } catch {} renderHome(); });
-  $("today-time").addEventListener("click", (e) => { const b = e.target.closest("button[data-min]"); if (!b) return;
-    todayMin = +b.dataset.min; try { localStorage.setItem("ibmath.min", todayMin); } catch {} renderHome(); });
-  $("today-go").onclick = () => startSet("Today", buildToday(todayMin).qs);
-  $("h-cont-go").onclick = () => { const sv = lsGet(SKEY2); const qs = (sv.ids || []).map((id) => QBYID.get(id)).filter(Boolean); if (!qs.length) return;
-    const at = qs.findIndex((q) => !(sv.rated || {})[q.id]); startSet(sv.name, qs, Math.max(0, at)); sess.rated = sv.rated || {}; sessSave(); renderSess(); };
-  $("sess-exit").onclick = () => { exitSet(); showView("home"); };
-  $("sess-home").onclick = () => { exitSet(); showView("home"); };
+function setupSets() {
+  $("sess-exit").onclick = () => { exitSet(); showView("browse"); };
+  $("sess-home").onclick = () => { exitSet(); showView("browse"); };
   $("sess-again").onclick = () => { const ids = Object.entries(sess.rated).filter(([, r]) => r !== "got").map(([id]) => QBYID.get(id)); startSet("Again: " + sess.name, ids); };
 }
 
@@ -1417,7 +1364,8 @@ function setupBrowse() {
     else if (head) goPractice({ level, subject, topic: head.dataset.topic });
   });
   $("b-marked").onclick = () => goPractice({ marked: true });
-  $("b-due").onclick = () => goPractice({ status: "due" });
+  $("b-due").onclick = () => { const pool = coursePool(), rk = (q) => ({ missed: 0, partly: 1 }[qstate[q.id].rating] ?? 2);
+    startSet("Review", shuffle(pool.filter((q) => isDue(qstate[q.id]))).sort((a, b) => rk(a) - rk(b))); };
   $("b-weak").onclick = () => { const [level, subject] = bScope.split("|"); goPractice({ level, subject, topic: $("b-weak").dataset.topic, sub: $("b-weak").dataset.sub }); };
 }
 function setupPractice() {
@@ -1483,14 +1431,14 @@ async function init() {
   fillSelect($("f-year"), years); fillSelect($("r-year"), years);
   refreshTopicFilters();
   document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showView(b.dataset.view));
-  $("hdr-home").onclick = () => showView("home");
+  $("hdr-home").onclick = () => showView("browse");
   QBYID = new Map(questions.map((q) => [q.id, q]));
-  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher(); setupHome();
+  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher(); setupSets();
   showNotice(aside);
   renderList(true);
   try { bScope = localStorage.getItem("ibmath.scope") || bScope; } catch {}
-  let v = "home"; try { v = localStorage.getItem("ibmath.view") || "home"; } catch {}
-  if (v === "practice" && !applied && !sess) v = "home"; // an empty Practice page is no place to start
+  let v = "browse"; try { v = localStorage.getItem("ibmath.view") || "browse"; } catch {}
+  if (v === "practice" && !applied && !sess) v = "browse"; // an empty Practice page is no place to start
   showView(v);
 }
 init();

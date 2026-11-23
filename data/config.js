@@ -6,4 +6,4 @@ window.IB_REMOTE = {
  "bucket": "content"
 };
 // Shown in Settings so you can tell which build you are running.
-window.IB_VERSION = "2026-11-22 21:46 UTC";
+window.IB_VERSION = "2026-11-23 08:06 UTC";

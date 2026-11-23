@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IB Math Practice</title>
-<link rel="stylesheet" href="style.css?v=202611222146">
+<link rel="stylesheet" href="style.css?v=202611230806">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#2f5bea">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -73,12 +73,11 @@
 </div>
 
 <header>
-  <button id="hdr-home" class="icon-btn" aria-label="Home" title="Home">&#8962;</button>
+  <button id="hdr-home" class="icon-btn" aria-label="Topics" title="Topics">&#9776;</button>
   <h1>IB Math Practice</h1>
   <nav>
-    <button data-view="home" class="active"><i aria-hidden="true">&#8962;</i>Today</button>
+    <button data-view="browse" class="active"><i aria-hidden="true">&#9776;</i>Topics</button>
     <button data-view="practice"><i aria-hidden="true">&#9998;</i>Practice</button>
-    <button data-view="browse"><i aria-hidden="true">&#9776;</i>Topics</button>
     <button data-view="review" id="nav-review" hidden>Tag editor</button>
     <button data-view="teacher" id="nav-teacher" hidden><i aria-hidden="true">&#9786;</i>Students</button>
   </nav>
@@ -87,31 +86,13 @@
 
 <div id="notice" class="notice" hidden><span id="notice-text"></span><button id="notice-close">OK</button></div>
 
-<main id="home">
-  <div class="h-wrap">
-    <div class="h-hello"><h2 id="h-hello">IB Math Practice</h2><span id="h-week" class="muted"></span></div>
-    <section class="today" id="today">
-      <div class="today-top">
-        <div><div class="k">Today's practice</div><div class="today-sub muted" id="t-course-line"></div></div>
-        <label class="h-course">Course<select id="h-scope"><option value="HL|AA">HL Analysis &amp; Approaches</option><option value="SL|AA">SL Analysis &amp; Approaches</option><option value="HL|AI">HL Applications &amp; Interpretation</option><option value="SL|AI">SL Applications &amp; Interpretation</option></select></label>
-      </div>
-      <div class="today-time" id="today-time" role="group" aria-label="Time">
-        <button data-min="15">15 min</button><button data-min="30">30 min</button><button data-min="60">60 min</button>
-      </div>
-      <div class="today-plan" id="today-plan"></div>
-      <button class="primary today-go" id="today-go">Start</button>
-    </section>
-    <div class="h-cont" id="h-cont" hidden><span id="h-cont-t"></span><button id="h-cont-go">Continue</button></div>
-  </div>
-</main>
-
-<main id="browse" hidden>
+<main id="browse">
   <div class="topbar">
     <div id="b-scope" class="seg">
-      <button data-scope="HL|AA">HL Analysis &amp; Approaches</button>
-      <button data-scope="SL|AA">SL Analysis &amp; Approaches</button>
-      <button data-scope="HL|AI">HL Applications &amp; Interpretation</button>
-      <button data-scope="SL|AI">SL Applications &amp; Interpretation</button>
+      <button data-scope="HL|AA"><span class="lg">HL Analysis &amp; Approaches</span><span class="sh">AA HL</span></button>
+      <button data-scope="SL|AA"><span class="lg">SL Analysis &amp; Approaches</span><span class="sh">AA SL</span></button>
+      <button data-scope="HL|AI"><span class="lg">HL Applications &amp; Interpretation</span><span class="sh">AI HL</span></button>
+      <button data-scope="SL|AI"><span class="lg">SL Applications &amp; Interpretation</span><span class="sh">AI SL</span></button>
     </div>
   </div>
   <div class="b-sum">
@@ -180,7 +161,7 @@
       </div>
       <div id="sessbar" hidden><button id="sess-exit" title="Leave this set">&#10005; Exit</button><b id="sess-name"></b><span id="sess-prog" class="sess-prog"></span></div>
       <div id="empty">Pick a topic in <b>Topics</b>, or open the question list.</div>
-      <div id="sess-done" hidden><h2>Set finished</h2><p id="sess-sum"></p><div class="row"><button id="sess-home" class="primary">Back to Home</button><button id="sess-again">Practise the ones I missed</button></div></div>
+      <div id="sess-done" hidden><h2>Set finished</h2><p id="sess-sum"></p><div class="row"><button id="sess-home" class="primary">Back to Topics</button><button id="sess-again">Practise the ones I missed</button></div></div>
       <div id="question" hidden>
         <div id="meta"></div>
         <div id="panes">
@@ -337,10 +318,10 @@
   </section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" crossorigin="anonymous"></script>
-<script src="data/config.js?v=202611222146"></script>
+<script src="data/config.js?v=202611230806"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-<script src="data/data.js?v=202611222146"></script>
-<script src="app.js?v=202611222146"></script>
+<script src="data/data.js?v=202611230806"></script>
+<script src="app.js?v=202611230806"></script>
 </body>
 </html>
