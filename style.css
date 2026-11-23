@@ -455,6 +455,8 @@ button.linkish{border:0;background:none;color:var(--acc);font-weight:600;padding
 .cc-n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:7px;background:var(--acc);color:var(--on-acc);font-size:13px;font-weight:700}
 .cc-rule{background:var(--bg);border-radius:10px;padding:2px 10px;overflow-x:auto;overflow-y:hidden}
 .cc-rule .katex-display{margin:8px 0}
+.cc-rule,.ex-tex{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;column-gap:22px}
+.rp{min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;text-align:center;padding:8px 0;font-size:1.08em;line-height:1.9}
 .cc-eg,.cc-watch{font-size:15px;line-height:1.55}
 .cc .lbl{display:inline-block;font-style:normal;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:6px;margin-right:4px;vertical-align:1px}
 .cc-eg .lbl{background:#e0e7ff;color:#3730a3}.cc-watch .lbl{background:#fee2e2;color:#991b1b}
@@ -467,7 +469,7 @@ details.ex summary::before{content:"▸ "}details.ex[open] summary::before{conte
 .ex-q{margin:8px 0 0}
 details.ex ol{margin:8px 0 0;padding:0 0 0 1.4em}
 details.ex ol li{margin:10px 0}
-.ex-tex{overflow-x:auto;overflow-y:hidden}.ex-tex .katex-display{margin:2px 0;text-align:left}
+.ex-tex{overflow-x:auto;overflow-y:hidden;justify-content:flex-start}.ex-tex .rp{text-align:left;padding:4px 0}.ex-tex .katex-display{margin:2px 0;text-align:left}
 .ex-tex .katex-display>.katex{text-align:left}
 .ex-why{font-size:14px;color:var(--mute)}
 .ex-ans{margin:6px 0 4px;padding:8px 12px;background:#ecfdf5;color:#065f46;border-radius:8px;font-weight:600}
@@ -477,6 +479,7 @@ figure.gr{margin:0;background:var(--card);border:1px solid var(--line);border-ra
 .g-grid{stroke:#eef0f3;stroke-width:1}.g-ax{stroke:#9ca3af;stroke-width:1.2}
 .g-pos{fill:rgba(47,91,234,.18)}.g-neg{fill:rgba(220,38,38,.18)}
 .g-lab{font:600 12px system-ui,sans-serif}.g-dot{fill:#111;stroke:#fff;stroke-width:2}
+.g-pt{fill:#dc2626;stroke:#fff;stroke-width:1.5}.g-asy{stroke:#6b7280;stroke-width:1.2;stroke-dasharray:5 4}.g-mark{fill:#374151;font-weight:500}
 figure.gr figcaption{font-size:14px;line-height:1.5}
 .calc{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
 .calc-h,.calc-r{display:grid;grid-template-columns:1fr 2.2fr;gap:14px;padding:10px 14px}

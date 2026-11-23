@@ -1342,15 +1342,37 @@ function rich(v) { // maths first (kept aside as placeholders), then **bold** / 
 function kx(tex, display) {
   try { return window.katex ? katex.renderToString(tex, { displayMode: display, throwOnError: false }) : esc(tex); } catch { return esc(tex); }
 }
+// a display rule "A, \\quad B, \\qquad C" is cut at the top-level \\quad / \\qquad into pieces that wrap onto new lines
+// on a narrow screen (flex-wrap in .cc-rule) instead of running off the card
+function kxWrap(tex) {
+  const parts = []; let depth = 0, env = 0, last = 0;
+  for (let i = 0; i < tex.length; i++) {
+    const c = tex[i];
+    if (c === "{") depth++; else if (c === "}") depth--;
+    else if (c === "\\") {
+      const m = /^\\(begin|end|left|right|qquad|quad)(?![a-zA-Z])/.exec(tex.slice(i));
+      if (!m) { i++; continue; }
+      if (m[1] === "begin" || m[1] === "left") env++; else if (m[1] === "end" || m[1] === "right") env--;
+      else if (!depth && !env) { parts.push(tex.slice(last, i)); last = i + m[0].length; }
+      i += m[0].length - 1;
+    }
+  }
+  parts.push(tex.slice(last));
+  // each piece in inline mode with \\displaystyle: KaTeX can then break a long piece after =, +, \\Rightarrow ... and,
+  // with \\allowbreak between the words of a \\text{...}, inside a phrase; never inside a simple ( ... )
+  const brk = (x) => x.replace(/\\text\{([^{}]*)\}/g, (_, w) => w.split(/(?<= )/).map((v) => `\\text{${v}}`).join("\\allowbreak "))
+    .replace(/(?<!\\(?:left|right|big|Big|bigg|Bigg))\(([^(){}]*)\)/g, "{($1)}");
+  return parts.map((x) => x.trim()).filter(Boolean).map((x) => `<span class="rp">${kx("\\displaystyle " + brk(x), false)}</span>`).join("");
+}
 function renderNotes(n, level) {
   const show = (x) => !(x.hl && level !== "HL");  // SL pages leave HL-only items out
   const tag = (x) => (x.hl ? '<span class="hl">HL</span>' : "");
   const bk = (p) => (p ? `<button class="bk" data-p="${p}">Booklet p.${p - 1}</button>` : "");
   const example = (e) => `<details class="ex"><summary>Worked example</summary><div class="ex-q">${rich(e.q)}</div>` +
-    `<ol>${e.steps.map((st) => `<li><div class="ex-tex">${kx(st.tex, true)}</div><div class="ex-why">${rich(st.why)}</div></li>`).join("")}</ol>` +
+    `<ol>${e.steps.map((st) => `<li><div class="ex-tex">${kxWrap(st.tex)}</div><div class="ex-why">${rich(st.why)}</div></li>`).join("")}</ol>` +
     `<div class="ex-ans">Answer: ${kx(e.ans, false)}</div></details>`;
   const cards = (n.concepts || []).filter(show).map((c, i) => `<div class="cc"><div class="cc-h"><span class="cc-n">${i + 1}</span><b>${rich(c.t)}</b>${tag(c)}${bk(c.booklet)}</div>` +
-    `<div class="cc-rule">${kx(c.rule, true)}</div><div class="cc-eg"><em class="lbl">e.g.</em> ${rich(c.eg)}</div>` +
+    `<div class="cc-rule">${kxWrap(c.rule)}</div><div class="cc-eg"><em class="lbl">e.g.</em> ${rich(c.eg)}</div>` +
     `<div class="cc-watch"><em class="lbl">Watch out</em> ${rich(c.watch)}</div>${c.example ? example(c.example) : ""}</div>`).join("");
   const graphs = (n.graphs || []).filter(show).map((g) => `<figure class="gr">${plotSvg(g.plot)}<figcaption><b>${rich(g.t)}</b><br>${rich(g.cap)}</figcaption></figure>`).join("");
   const calc = n.calculator ? `<p class="muted">${rich(n.calculator.intro)}</p><div class="calc"><div class="calc-h"><span>Task</span><b>${esc(n.calculator.model || "GDC")}</b></div>` +
@@ -1363,27 +1385,37 @@ function renderNotes(n, level) {
     (calc ? `<section><h3>On the calculator (Paper 2, ${esc(n.calculator.model || "GDC")})</h3>${calc}</section>` : "") +
     (ask ? `<section><h3>How IB asks</h3><div class="ask">${ask}</div></section>` : "");
 }
-// Small graphs for the notes: { x:[a,b], y:[c,d], fns:[{f, label}], shade:{f, a, b}, dot:[x,y] }; f is a JS expression in x.
+// Small graphs for the notes: { x:[a,b], y:[c,d], fns:[{f, label}], shade:{f, a, b}, dot:[x,y], pts:[[x,y]...],
+// marks:[[x,y,"text"]...], vlines:[x...], hlines:[y...] (dashed) }; f is a JS expression in x (NaN = not drawn).
 function plotSvg(sp) {
   const W = 320, H = 210, P = 14, [x0, x1] = sp.x, [y0, y1] = sp.y;
   const X = (x) => P + (x - x0) / (x1 - x0) * (W - 2 * P), Y = (y) => H - P - (y - y0) / (y1 - y0) * (H - 2 * P);
   const fn = (e) => { try { return new Function("x", `return (${e});`); } catch { return () => NaN; } };
   const cols = ["var(--acc)", "#16a34a", "#d97706", "#dc2626"];
   let out = "";
-  for (let gx = Math.ceil(x0); gx <= x1; gx++) out += `<line x1="${X(gx)}" y1="${P}" x2="${X(gx)}" y2="${H - P}" class="g-grid"/>`;
-  for (let gy = Math.ceil(y0); gy <= y1; gy++) out += `<line x1="${P}" y1="${Y(gy)}" x2="${W - P}" y2="${Y(gy)}" class="g-grid"/>`;
+  const nice = (r) => { const s0 = Math.pow(10, Math.floor(Math.log10(r / 8))); return [1, 2, 5, 10].map((m) => m * s0).find((v) => r / v <= 12); }; // about 8-12 grid lines
+  const sx = nice(x1 - x0), sy = nice(y1 - y0);
+  for (let gx = Math.ceil(x0 / sx) * sx; gx <= x1; gx += sx) out += `<line x1="${X(gx)}" y1="${P}" x2="${X(gx)}" y2="${H - P}" class="g-grid"/>`;
+  for (let gy = Math.ceil(y0 / sy) * sy; gy <= y1; gy += sy) out += `<line x1="${P}" y1="${Y(gy)}" x2="${W - P}" y2="${Y(gy)}" class="g-grid"/>`;
   if (sp.shade) { const f = fn(sp.shade.f), N = 160, pos = [], neg = [];
     for (let i = 0; i <= N; i++) { const x = sp.shade.a + (sp.shade.b - sp.shade.a) * i / N, y = f(x); (y >= 0 ? pos : neg).push(x); }
     const band = (keep) => { let d = "", run = []; const flush = () => { if (run.length > 1) d += `<path d="M${X(run[0])},${Y(0)} ${run.map((x) => `L${X(x)},${Y(f(x))}`).join(" ")} L${X(run[run.length - 1])},${Y(0)} Z" class="${keep ? "g-pos" : "g-neg"}"/>`; run = []; };
       for (let i = 0; i <= N; i++) { const x = sp.shade.a + (sp.shade.b - sp.shade.a) * i / N, y = f(x); if ((y >= 0) === keep) run.push(x); else flush(); } flush(); return d; };
     out += band(true) + band(false); }
+  (sp.vlines || []).forEach((v) => { out += `<line x1="${X(v)}" y1="${P}" x2="${X(v)}" y2="${H - P}" class="g-asy"/>`; }); // asymptotes, dashed
+  (sp.hlines || []).forEach((v) => { out += `<line x1="${P}" y1="${Y(v)}" x2="${W - P}" y2="${Y(v)}" class="g-asy"/>`; });
   out += `<line x1="${P}" y1="${Y(0)}" x2="${W - P}" y2="${Y(0)}" class="g-ax"/><line x1="${X(0)}" y1="${P}" x2="${X(0)}" y2="${H - P}" class="g-ax"/>`;
-  (sp.fns || []).forEach((g, k) => { const f = fn(g.f), pts = []; for (let i = 0; i <= 200; i++) { const x = x0 + (x1 - x0) * i / 200, y = f(x); if (isFinite(y) && y >= y0 - 1 && y <= y1 + 1) pts.push(`${X(x).toFixed(1)},${Y(y).toFixed(1)}`); }
-    out += `<polyline points="${pts.join(" ")}" fill="none" stroke="${cols[k % cols.length]}" stroke-width="2.2"/>`;
+  (sp.fns || []).forEach((g, k0) => { const k = g.c ?? k0, f = fn(g.f), runs = [[]]; let prev = null; // c: colour index (same colour for pieces of one curve)
+    for (let i = 0; i <= 400; i++) { const x = x0 + (x1 - x0) * i / 400, y = f(x), ok = isFinite(y) && y >= y0 - (y1 - y0) && y <= y1 + (y1 - y0);
+      if (!ok || (prev !== null && Math.abs(y - prev) > (y1 - y0) * 0.8)) runs.push([]); // gap or jump: start a new piece
+      if (ok) runs[runs.length - 1].push(`${X(x).toFixed(1)},${Y(Math.max(y0 - 0.05 * (y1 - y0), Math.min(y1 + 0.05 * (y1 - y0), y))).toFixed(1)}`); prev = ok ? y : null; }
+    runs.filter((r) => r.length > 1).forEach((r) => { out += `<polyline points="${r.join(" ")}" fill="none" stroke="${cols[k % cols.length]}" stroke-width="2.2"/>`; });
     if (g.label) out += `<rect x="${P + 4}" y="${P + 4 + k * 18}" width="16" height="3" rx="1.5" fill="${cols[k % cols.length]}"/>` +
       `<text x="${P + 26}" y="${P + 9 + k * 18}" class="g-lab" fill="${cols[k % cols.length]}">${esc(g.label)}</text>`; }); // legend, top left
   if (sp.dot) out += `<circle cx="${X(sp.dot[0])}" cy="${Y(sp.dot[1])}" r="4.5" class="g-dot"/>`;
-  return `<svg viewBox="0 0 ${W} ${H}" class="gsvg" role="img" aria-label="graph">${out}</svg>`;
+  (sp.pts || []).forEach(([px, py]) => { out += `<circle cx="${X(px)}" cy="${Y(py)}" r="3.6" class="g-pt"/>`; }); // points: terms, roots, data
+  (sp.marks || []).forEach(([px, py, t]) => { out += `<text x="${X(px) + 6}" y="${Y(py) - 6}" class="g-lab g-mark">${esc(t)}</text>`; });
+  return `<svg viewBox="0 0 ${W} ${H}" class="gsvg" role="img" aria-label="graph"><defs><clipPath id="gclip"><rect x="${P}" y="${P}" width="${W - 2 * P}" height="${H - 2 * P}"/></clipPath></defs><g clip-path="url(#gclip)">${out}</g></svg>`;
 }
 function subQs() { const { level, subject, topic, sub } = subCur; return questions.filter((q) => q.level === level && q.subject === subject && q.topic === topic && q.subtopic === sub); }
 async function openSub(topic, sub) {
