@@ -1178,11 +1178,11 @@ function setupSettings() {
   $("clear-cache").onclick = () => caches.delete(CACHE).then(() => alert("Cached images cleared."));
 }
 
-const VIEWS = ["browse", "practice", "review", "teacher"];
+const VIEWS = ["browse", "sub", "practice", "review", "teacher"];
 const canEditTags = () => !SBMODE || me.teacher; // sign-in mode: the Tag editor is for teachers only
 function showView(v) {
   if (!VIEWS.includes(v) || (v === "review" && !canEditTags()) || (v === "teacher" && !me.teacher)) v = "browse";
-  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.view === v));
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.view === (v === "sub" ? "browse" : v)));
   document.body.dataset.view = v;
   for (const id of VIEWS) $(id).hidden = id !== v;
   $("nav-review").hidden = v !== "review";  // the Tag editor tab only shows while you are in it
@@ -1190,6 +1190,7 @@ function showView(v) {
   if (v === "review") { renderReviewList(); if (!current_r && isNarrow()) openList($("review"), true); }
   if (v === "browse") renderBrowse();
   if (v === "teacher") renderTeacher();
+  if (v === "sub" && !subCur) v = "browse";
   window.scrollTo(0, 0);
 }
 
@@ -1320,6 +1321,115 @@ function setupSets() {
   $("sess-again").onclick = () => { const ids = Object.entries(sess.rated).filter(([, r]) => r !== "got").map(([id]) => QBYID.get(id)); startSet("Again: " + sess.name, ids); };
 }
 
+// ---------------- subtopic page: Learn (notes, data/notes/<AA|AI>.js) + Practice (this subtopic's questions) ----------------
+let subCur = null; // { level, subject, topic, sub }
+const notesLoaded = {};
+function loadNotes(subject) {
+  if (notesLoaded[subject]) return notesLoaded[subject];
+  const rel = `data/notes/${subject}.js`;
+  notesLoaded[subject] = REMOTE ? loadRemoteScript(rel).catch(() => {})
+    : new Promise((ok) => { const el = document.createElement("script"); el.src = rel; el.onload = el.onerror = ok; document.head.appendChild(el); });
+  return notesLoaded[subject];
+}
+// text with **bold** and $inline maths$; an object { en, ko } picks the language (only en for now)
+const tx = (v) => (v && typeof v === "object" ? v.en : v) || "";
+function rich(v) { // maths first (kept aside as placeholders), then **bold** / *italic* over the whole line
+  const maths = [];
+  const t = esc(tx(v).replace(/\$([^$]+)\$/g, (_, m) => `\u0000${maths.push(m) - 1}\u0000`))
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\*([^*\s][^*]*?)\*/g, "<i>$1</i>");
+  return t.replace(/\u0000(\d+)\u0000/g, (_, i) => kx(maths[+i], false));
+}
+function kx(tex, display) {
+  try { return window.katex ? katex.renderToString(tex, { displayMode: display, throwOnError: false }) : esc(tex); } catch { return esc(tex); }
+}
+function renderNotes(n, level) {
+  const show = (x) => !(x.hl && level !== "HL");  // SL pages leave HL-only items out
+  const tag = (x) => (x.hl ? '<span class="hl">HL</span>' : "");
+  const bk = (p) => (p ? `<button class="bk" data-p="${p}">Booklet p.${p - 1}</button>` : "");
+  const example = (e) => `<details class="ex"><summary>Worked example</summary><div class="ex-q">${rich(e.q)}</div>` +
+    `<ol>${e.steps.map((st) => `<li><div class="ex-tex">${kx(st.tex, true)}</div><div class="ex-why">${rich(st.why)}</div></li>`).join("")}</ol>` +
+    `<div class="ex-ans">Answer: ${kx(e.ans, false)}</div></details>`;
+  const cards = (n.concepts || []).filter(show).map((c, i) => `<div class="cc"><div class="cc-h"><span class="cc-n">${i + 1}</span><b>${rich(c.t)}</b>${tag(c)}${bk(c.booklet)}</div>` +
+    `<div class="cc-rule">${kx(c.rule, true)}</div><div class="cc-eg"><em class="lbl">e.g.</em> ${rich(c.eg)}</div>` +
+    `<div class="cc-watch"><em class="lbl">Watch out</em> ${rich(c.watch)}</div>${c.example ? example(c.example) : ""}</div>`).join("");
+  const graphs = (n.graphs || []).filter(show).map((g) => `<figure class="gr">${plotSvg(g.plot)}<figcaption><b>${rich(g.t)}</b><br>${rich(g.cap)}</figcaption></figure>`).join("");
+  const calc = n.calculator ? `<p class="muted">${rich(n.calculator.intro)}</p><div class="calc"><div class="calc-h"><span>Task</span><b>${esc(n.calculator.model || "GDC")}</b></div>` +
+    n.calculator.rows.map((r) => `<div class="calc-r"><b>${rich(r.task)}</b><div>${rich(r.how)}</div></div>`).join("") +
+    `</div><p class="muted small">${rich(n.calculator.tip)}</p>` : "";
+  const ask = (n.ask || []).map(([q, a]) => `<div class="ask-r"><div class="ask-q">${rich(q)}</div><div class="ask-a">${rich(a)}</div></div>`).join("");
+  return `<p class="intro">${rich(n.intro)}</p>` +
+    `<section><h3>Concepts</h3><div class="ccs">${cards}</div></section>` +
+    (graphs ? `<section><h3>See it on a graph</h3><div class="grs">${graphs}</div></section>` : "") +
+    (calc ? `<section><h3>On the calculator (Paper 2, ${esc(n.calculator.model || "GDC")})</h3>${calc}</section>` : "") +
+    (ask ? `<section><h3>How IB asks</h3><div class="ask">${ask}</div></section>` : "");
+}
+// Small graphs for the notes: { x:[a,b], y:[c,d], fns:[{f, label}], shade:{f, a, b}, dot:[x,y] }; f is a JS expression in x.
+function plotSvg(sp) {
+  const W = 320, H = 210, P = 14, [x0, x1] = sp.x, [y0, y1] = sp.y;
+  const X = (x) => P + (x - x0) / (x1 - x0) * (W - 2 * P), Y = (y) => H - P - (y - y0) / (y1 - y0) * (H - 2 * P);
+  const fn = (e) => { try { return new Function("x", `return (${e});`); } catch { return () => NaN; } };
+  const cols = ["var(--acc)", "#16a34a", "#d97706", "#dc2626"];
+  let out = "";
+  for (let gx = Math.ceil(x0); gx <= x1; gx++) out += `<line x1="${X(gx)}" y1="${P}" x2="${X(gx)}" y2="${H - P}" class="g-grid"/>`;
+  for (let gy = Math.ceil(y0); gy <= y1; gy++) out += `<line x1="${P}" y1="${Y(gy)}" x2="${W - P}" y2="${Y(gy)}" class="g-grid"/>`;
+  if (sp.shade) { const f = fn(sp.shade.f), N = 160, pos = [], neg = [];
+    for (let i = 0; i <= N; i++) { const x = sp.shade.a + (sp.shade.b - sp.shade.a) * i / N, y = f(x); (y >= 0 ? pos : neg).push(x); }
+    const band = (keep) => { let d = "", run = []; const flush = () => { if (run.length > 1) d += `<path d="M${X(run[0])},${Y(0)} ${run.map((x) => `L${X(x)},${Y(f(x))}`).join(" ")} L${X(run[run.length - 1])},${Y(0)} Z" class="${keep ? "g-pos" : "g-neg"}"/>`; run = []; };
+      for (let i = 0; i <= N; i++) { const x = sp.shade.a + (sp.shade.b - sp.shade.a) * i / N, y = f(x); if ((y >= 0) === keep) run.push(x); else flush(); } flush(); return d; };
+    out += band(true) + band(false); }
+  out += `<line x1="${P}" y1="${Y(0)}" x2="${W - P}" y2="${Y(0)}" class="g-ax"/><line x1="${X(0)}" y1="${P}" x2="${X(0)}" y2="${H - P}" class="g-ax"/>`;
+  (sp.fns || []).forEach((g, k) => { const f = fn(g.f), pts = []; for (let i = 0; i <= 200; i++) { const x = x0 + (x1 - x0) * i / 200, y = f(x); if (isFinite(y) && y >= y0 - 1 && y <= y1 + 1) pts.push(`${X(x).toFixed(1)},${Y(y).toFixed(1)}`); }
+    out += `<polyline points="${pts.join(" ")}" fill="none" stroke="${cols[k % cols.length]}" stroke-width="2.2"/>`;
+    if (g.label) out += `<rect x="${P + 4}" y="${P + 4 + k * 18}" width="16" height="3" rx="1.5" fill="${cols[k % cols.length]}"/>` +
+      `<text x="${P + 26}" y="${P + 9 + k * 18}" class="g-lab" fill="${cols[k % cols.length]}">${esc(g.label)}</text>`; }); // legend, top left
+  if (sp.dot) out += `<circle cx="${X(sp.dot[0])}" cy="${Y(sp.dot[1])}" r="4.5" class="g-dot"/>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="gsvg" role="img" aria-label="graph">${out}</svg>`;
+}
+function subQs() { const { level, subject, topic, sub } = subCur; return questions.filter((q) => q.level === level && q.subject === subject && q.topic === topic && q.subtopic === sub); }
+async function openSub(topic, sub) {
+  const [level, subject] = bScope.split("|"), s = (topics[subject].find((t) => t.id === topic) || { subtopics: [] }).subtopics.find((x) => x.id === sub);
+  subCur = { level, subject, topic, sub, name: s ? s.name : sub };
+  $("sub-title").textContent = `${sub} ${subCur.name}`;
+  const qs = subQs(), r = tally(qs);
+  $("sub-meta").textContent = `${level} ${subject === "AA" ? "Analysis & Approaches" : "Applications & Interpretation"} · ${qs.length} past-paper question${qs.length === 1 ? "" : "s"}` + (SBMODE && r.tried ? ` · ${r.tried} tried, ${r.missed} missed` : "");
+  $("sub-tab-prac").textContent = `Practice (${qs.length})`;
+  subTab("learn"); showView("sub");
+  $("sub-learn").innerHTML = '<p class="muted">Loading…</p>';
+  await loadNotes(subject);
+  const n = (window.IB_NOTES || {})[`${subject}|${sub}`];
+  if (subCur && subCur.sub === sub) $("sub-learn").innerHTML = n ? renderNotes(n, level)
+    : `<p class="muted">Notes for this subtopic are on the way. Meanwhile, practise its past-paper questions.</p><button class="primary" id="sub-go-prac">See the questions</button>`;
+  const go = $("sub-go-prac"); if (go) go.onclick = () => subTab("prac");
+  renderSubQs();
+}
+const subOrder = (qs) => qs.slice().sort((a, b) => (a.difficulty || 3) - (b.difficulty || 3) || b.year - a.year);
+function renderSubQs() {
+  const qs = subOrder(subQs());
+  $("sub-start-note").textContent = qs.length ? "Easy questions first, then harder ones." : "";
+  $("sub-start").disabled = !qs.length;
+  $("sub-qs").innerHTML = [1, 2, 3].map((t) => { const g = qs.filter((q) => tier(q.difficulty) === t); if (!g.length) return "";
+    return `<h3>${TIER_NAMES[t]} <small class="muted">${g.length}</small></h3><ul class="sub-list">${g.map((q) =>
+      `<li data-id="${q.id}"><span class="l">${rdot(q)}${label(q)}</span>` +
+      `<span class="r">${vHas(q) ? '<span class="vid-badge" title="Has a video">&#9654; video</span>' : ""}${q.marks}m</span><small>${esc(q.title || "")}</small></li>`).join("")}</ul>`; }).join("");
+}
+function subTab(which) {
+  $("sub-tab-learn").classList.toggle("on", which === "learn"); $("sub-tab-prac").classList.toggle("on", which === "prac");
+  $("sub-learn").hidden = which !== "learn"; $("sub-prac").hidden = which !== "prac";
+}
+function setupSub() {
+  $("sub-back").onclick = () => showView("browse");
+  $("sub-tab-learn").onclick = () => subTab("learn"); $("sub-tab-prac").onclick = () => subTab("prac");
+  $("sub-start").onclick = () => startSet(`${subCur.sub} ${subCur.name}`, subOrder(subQs()));
+  $("sub-filters").onclick = () => goPractice({ level: subCur.level, subject: subCur.subject, topic: subCur.topic, sub: subCur.sub });
+  $("sub-qs").addEventListener("click", (e) => { const li = e.target.closest("li[data-id]"); if (!li) return;
+    const qs = subOrder(subQs()); startSet(`${subCur.sub} ${subCur.name}`, qs, qs.findIndex((q) => q.id === li.dataset.id)); });
+  $("sub-learn").addEventListener("click", (e) => { const b = e.target.closest("button.bk"); if (!b) return;
+    const p = +b.dataset.p; $("bk-title").textContent = `Formula booklet, page ${p - 1}`;
+    setImage($("bk-img"), `data/formula/${subCur.subject}/p${String(p).padStart(2, "0")}.webp`); $("bk-ov").hidden = false; });
+  $("bk-close").onclick = () => { $("bk-ov").hidden = true; };
+  $("bk-ov").addEventListener("click", (e) => { if (e.target === $("bk-ov")) $("bk-ov").hidden = true; });
+}
+
 // ---------------- browse tab: topic index with counts ----------------
 let bScope = "HL|AA";
 function renderBrowse() {
@@ -1360,7 +1470,7 @@ function setupBrowse() {
   $("b-cards").addEventListener("click", (e) => {
     const [level, subject] = bScope.split("|");
     const row = e.target.closest(".srow"), head = e.target.closest("h3");
-    if (row && !row.classList.contains("zero")) goPractice({ level, subject, topic: row.dataset.topic, sub: row.dataset.sub });
+    if (row && !row.classList.contains("zero")) openSub(row.dataset.topic, row.dataset.sub);
     else if (head) goPractice({ level, subject, topic: head.dataset.topic });
   });
   $("b-marked").onclick = () => goPractice({ marked: true });
@@ -1433,11 +1543,12 @@ async function init() {
   document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showView(b.dataset.view));
   $("hdr-home").onclick = () => showView("browse");
   QBYID = new Map(questions.map((q) => [q.id, q]));
-  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher(); setupSets();
+  setupPractice(); setupReview(); setupBrowse(); setupSettings(); setupTeacher(); setupSets(); setupSub();
   showNotice(aside);
   renderList(true);
   try { bScope = localStorage.getItem("ibmath.scope") || bScope; } catch {}
   let v = "browse"; try { v = localStorage.getItem("ibmath.view") || "browse"; } catch {}
+  if (v === "sub") v = "browse";
   if (v === "practice" && !applied && !sess) v = "browse"; // an empty Practice page is no place to start
   showView(v);
 }
