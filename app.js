@@ -1361,7 +1361,7 @@ function kxWrap(tex) {
   // each piece in inline mode with \\displaystyle: KaTeX can then break a long piece after =, +, \\Rightarrow ... and,
   // with \\allowbreak between the words of a \\text{...}, inside a phrase; never inside a simple ( ... )
   const brk = (x) => x.replace(/\\text\{([^{}]*)\}/g, (_, w) => w.split(/(?<= )/).map((v) => `\\text{${v}}`).join("\\allowbreak "))
-    .replace(/(?<!\\(?:left|right|big|Big|bigg|Bigg))\(([^(){}]*)\)/g, "{($1)}");
+    .replace(/(?<!\\[a-zA-Z]+)\(([^(){}]*)\)/g, "{($1)}");
   return parts.map((x) => x.trim()).filter(Boolean).map((x) => `<span class="rp">${kx("\\displaystyle " + brk(x), false)}</span>`).join("");
 }
 function renderNotes(n, level) {
@@ -1374,13 +1374,34 @@ function renderNotes(n, level) {
   const cards = (n.concepts || []).filter(show).map((c, i) => `<div class="cc"><div class="cc-h"><span class="cc-n">${i + 1}</span><b>${rich(c.t)}</b>${tag(c)}${bk(c.booklet)}</div>` +
     `<div class="cc-rule">${kxWrap(c.rule)}</div><div class="cc-eg"><em class="lbl">e.g.</em> ${rich(c.eg)}</div>` +
     `<div class="cc-watch"><em class="lbl">Watch out</em> ${rich(c.watch)}</div>${c.example ? example(c.example) : ""}</div>`).join("");
+  // expandable concepts (a note whose concepts have `explain`): the closed row shows the title, a one-line summary and the
+  // key formulas (rule, plus hlRule on HL); tapping it opens the explanation, worked examples and "watch out".
+  // explain items and examples marked hl are shown on HL only.
+  const exBlock = (e, k) => `<div class="cx-ex"><div class="cx-exq"><span class="cx-exn">Example ${k + 1}</span>${tag(e)} ${rich(e.q)}</div>` +
+    `<ol>${(e.steps || []).map((st) => `<li><div class="ex-tex">${kxWrap(st.tex)}</div>${st.why ? `<div class="ex-why">${rich(st.why)}</div>` : ""}</li>`).join("")}</ol>` +
+    `<div class="ex-ans">Answer: ${kx(e.ans, false)}</div></div>`;
+  const para = (x) => (x && typeof x === "object" && "p" in x ? x : { p: x });
+  const rows = (n.concepts || []).filter(show).map((c, i) => {
+    const exps = [].concat(c.explain || []).map(para).filter(show), exs = (c.examples || []).filter(show);
+    return `<div class="cx"><button class="cx-h" aria-expanded="false"><span class="cc-n">${i + 1}</span>` +
+      `<span class="cx-t"><span class="cx-tt"><b>${rich(c.t)}</b>${tag(c)}</span>${c.summary ? `<span class="cx-s">${rich(c.summary)}</span>` : ""}` +
+      `</span><span class="cx-chev" aria-hidden="true"></span><span class="cx-rules"><span class="cc-rule cx-rule">${kxWrap(c.rule)}</span>` +
+      (c.hlRule && level === "HL" ? `<span class="cc-rule cx-rule cx-hlr"><span class="hl">HL</span>${kxWrap(c.hlRule)}</span>` : "") +
+      `<span class="cx-more">Explanation and ${exs.length} examples</span></span></button>` +
+      `<div class="cx-b" hidden>${c.booklet ? `<div class="cx-kh">${bk(c.booklet)}</div>` : ""}` +
+      (exps.length ? `<div class="cx-exp">${exps.map((x) => `<p>${rich(x.p)}</p>`).join("")}</div>` : "") +
+      (exs.length ? `<h4 class="cx-sh">Examples</h4>${exs.map(exBlock).join("")}` : "") +
+      (c.watch ? `<div class="cc-watch"><em class="lbl">Watch out</em> ${rich(c.watch)}</div>` : "") + `</div></div>`;
+  }).join("");
+  const expandable = (n.concepts || []).some((c) => c.explain);
   const graphs = (n.graphs || []).filter(show).map((g) => `<figure class="gr">${plotSvg(g.plot)}<figcaption><b>${rich(g.t)}</b><br>${rich(g.cap)}</figcaption></figure>`).join("");
   const calc = n.calculator ? `<p class="muted">${rich(n.calculator.intro)}</p><div class="calc"><div class="calc-h"><span>Task</span><b>${esc(n.calculator.model || "GDC")}</b></div>` +
     n.calculator.rows.map((r) => `<div class="calc-r"><b>${rich(r.task)}</b><div>${rich(r.how)}</div></div>`).join("") +
     `</div><p class="muted small">${rich(n.calculator.tip)}</p>` : "";
   const ask = (n.ask || []).map(([q, a]) => `<div class="ask-r"><div class="ask-q">${rich(q)}</div><div class="ask-a">${rich(a)}</div></div>`).join("");
   return `<p class="intro">${rich(n.intro)}</p>` +
-    `<section><h3>Concepts</h3><div class="ccs">${cards}</div></section>` +
+    (expandable ? `<section><h3>Concepts</h3><p class="muted small">Tap a concept for the explanation and worked examples.</p><div class="cxs">${rows}</div></section>`
+      : `<section><h3>Concepts</h3><div class="ccs">${cards}</div></section>`) +
     (graphs ? `<section><h3>See it on a graph</h3><div class="grs">${graphs}</div></section>` : "") +
     (calc ? `<section><h3>On the calculator (Paper 2, ${esc(n.calculator.model || "GDC")})</h3>${calc}</section>` : "") +
     (ask ? `<section><h3>How IB asks</h3><div class="ask">${ask}</div></section>` : "");
@@ -1455,6 +1476,10 @@ function setupSub() {
   $("sub-filters").onclick = () => goPractice({ level: subCur.level, subject: subCur.subject, topic: subCur.topic, sub: subCur.sub });
   $("sub-qs").addEventListener("click", (e) => { const li = e.target.closest("li[data-id]"); if (!li) return;
     const qs = subOrder(subQs()); startSet(`${subCur.sub} ${subCur.name}`, qs, qs.findIndex((q) => q.id === li.dataset.id)); });
+  $("sub-learn").addEventListener("click", (e) => { const h = e.target.closest("button.cx-h"); if (!h) return;
+    const open = h.getAttribute("aria-expanded") !== "true", box = h.parentElement;
+    h.setAttribute("aria-expanded", open); box.classList.toggle("open", open); box.querySelector(".cx-b").hidden = !open;
+    if (open && h.getBoundingClientRect().top < 60) box.scrollIntoView({ block: "start", behavior: "smooth" }); });
   $("sub-learn").addEventListener("click", (e) => { const b = e.target.closest("button.bk"); if (!b) return;
     const p = +b.dataset.p; $("bk-title").textContent = `Formula booklet, page ${p - 1}`;
     setImage($("bk-img"), `data/formula/${subCur.subject}/p${String(p).padStart(2, "0")}.webp`); $("bk-ov").hidden = false; });
